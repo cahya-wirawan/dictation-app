@@ -17,6 +17,8 @@ All notable changes to Local Dictation are documented here. The format follows [
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-12
+
 Milestone M4 (product UI) is complete.
 
 ### Added
@@ -146,7 +148,8 @@ Milestone M0 feasibility spike, partially complete. See `docs/IMPLEMENTATION_STA
 - No dictation session flow yet: there is no coordinator, config persistence, model manager or onboarding (milestone M1 and later).
 - Performance numbers so far come from a Linux x86_64 development host, not the reference hardware.
 
-[Unreleased]: https://github.com/cahya-wirawan/dictation-app/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/cahya-wirawan/dictation-app/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/cahya-wirawan/dictation-app/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/cahya-wirawan/dictation-app/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/cahya-wirawan/dictation-app/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/cahya-wirawan/dictation-app/compare/v0.1.0...v0.2.0
