@@ -45,3 +45,16 @@ summary { cursor: pointer; color: var(--muted); }
 .models li { display: grid; gap: 6px; padding: 10px; border: 1px solid var(--meter-bg); border-radius: 8px; }
 .models progress { width: 100%; }
 .badge { font-size: 0.75em; padding: 1px 6px; border-radius: 8px; background: var(--accent); color: var(--bg); }
+.pages { display: grid; grid-template-columns: 160px 1fr; gap: 16px; margin-top: 16px; }
+.tabs { display: flex; flex-direction: column; gap: 4px; }
+.tabs [role="tab"] { text-align: left; background: none; border: 1px solid transparent; border-radius: 6px; color: var(--fg); }
+.tabs [role="tab"][aria-selected="true"] { border-color: var(--accent); font-weight: 600; }
+.panel { min-width: 0; }
+.shortcut input { font: inherit; padding: 6px; width: 100%; max-width: 280px; }
+.onboarding section { min-height: 260px; }
+.onboarding h1:focus { outline: none; }
+.prose ul { padding-left: 20px; }
+.hud-pill.banner { font-size: 12px; }
+.hud-time { font-variant-numeric: tabular-nums; opacity: 0.8; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 560px) { .pages { grid-template-columns: 1fr; } .tabs { flex-direction: row; flex-wrap: wrap; } }

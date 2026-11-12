@@ -17,6 +17,25 @@ All notable changes to Local Dictation are documented here. The format follows [
 
 ## [Unreleased]
 
+Milestone M4 (product UI) is complete.
+
+### Added
+
+- **First-run onboarding:** welcome with the clipboard disclosure, microphone permission and test, model, shortcut, automatic paste or copy-only, a supervised trial, and done. It works fully from the keyboard, and a step can't advance until it's really done.
+- **Permissions:** native microphone and Accessibility status and requests on macOS, with links to the right System Settings pane and re-checking.
+- **Shortcut editor:** captures a chord and saves it only after the OS accepts it. The previous chord is kept on conflict.
+- **Settings pages:** General, Recording, Shortcuts, Transcription, Delivery, Privacy and About.
+- **Review window:** its own narrow permissions, a retention countdown, and automatic paste turned off while it's open.
+- **HUD:** elapsed time, plus a short "Text ready" or error banner.
+- **Launch at login:** opt-in, through a per-user LaunchAgent.
+- **Frontend tests:** vitest + Testing Library, run in CI.
+
+### Changed
+
+- Settings schema v2 adds `ui.onboarding_complete` and `ui.reduced_motion`, with an automatic migration from v1.
+- Draft commands check the calling window in Rust, in addition to the capability files.
+
+
 ## [0.4.0] - 2026-11-12
 
 Milestone M3 (delivery vertical slice) is complete.

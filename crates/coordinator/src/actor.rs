@@ -200,6 +200,8 @@ pub struct DraftInfo {
     pub id: SessionId,
     pub revision: u32,
     pub attempted: bool,
+    /// Time left before the memory-only draft is cleared (docs/01 §5).
+    pub expires_in_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -419,6 +421,8 @@ impl Actor {
                         id: d.id,
                         revision: d.revision,
                         attempted: d.attempted,
+                        expires_in_ms: dictation_domain::session::DRAFT_TTL_MS
+                            .saturating_sub(self.now_ms().saturating_sub(d.created_ms)),
                     }),
                     worker_epoch: self.machine.worker_epoch(),
                     capture_open: self.capture_open.is_some(),

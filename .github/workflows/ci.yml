@@ -36,6 +36,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm lint
+      - name: Frontend tests (keyboard flows, chord capture, copy)
+        run: pnpm test
       - run: pnpm build
       - name: Version consistency (Cargo, crates, Cargo.lock, package.json, Tauri, CHANGELOG)
         run: pnpm version:check

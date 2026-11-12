@@ -65,6 +65,24 @@ pub enum Permission {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PermissionKind {
+    Microphone,
+    /// macOS: required for target validation and the paste chord.
+    Accessibility,
+}
+
+/// OS permission state as reported by the platform, never a saved grant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PermissionStatus {
+    Granted,
+    Denied,
+    NotDetermined,
+    /// Blocked by policy (MDM, parental controls); the user cannot change it.
+    Restricted,
+    NotApplicable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DispatchOutcome {
     /// The OS API accepted all synthetic events. This does *not* prove the
     /// destination received text (docs/05 §5 step 8).

@@ -13,6 +13,7 @@ export default defineConfig({
       input: {
         main: resolve(import.meta.dirname, "index.html"),
         hud: resolve(import.meta.dirname, "hud.html"),
+        review: resolve(import.meta.dirname, "review.html"),
       },
     },
   },

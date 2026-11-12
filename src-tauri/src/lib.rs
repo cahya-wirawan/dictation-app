@@ -11,6 +11,7 @@
 
 mod mictest;
 mod models;
+mod onboarding;
 mod selftest;
 
 use std::collections::HashMap;
@@ -81,6 +82,7 @@ struct DraftMeta {
     id: String,
     revision: u32,
     attempted: bool,
+    expires_in_ms: u64,
 }
 
 #[derive(Serialize)]
@@ -98,6 +100,7 @@ struct Snapshot {
     active_model: Option<&'static str>,
     settings_revision: u64,
     settings_note: Option<String>,
+    onboarding_complete: bool,
     shortcuts: ShortcutStatus,
     mic_test_active: bool,
     last_probe: Option<ProbeReport>,
@@ -119,6 +122,17 @@ struct DraftView {
     text: String,
     reason: DraftReason,
     attempted: bool,
+    expires_in_ms: u64,
+}
+
+/// Draft text is readable only from the settings and review windows. The
+/// capability files enforce this too; Rust checks the label as well
+/// (docs/06 §1: capabilities do not sandbox mistakes in Rust).
+fn draft_window(w: &tauri::WebviewWindow) -> Result<(), String> {
+    match w.label() {
+        "main" | "review" => Ok(()),
+        _ => Err("not permitted from this window".into()),
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -143,6 +157,22 @@ struct LevelPayload {
 /// settings window. No payload contains transcript text.
 struct TauriNotifier {
     app: AppHandle,
+    /// Bumped on every phase/banner change so a delayed hide never hides
+    /// the HUD of a newer session.
+    hud_seq: Arc<std::sync::atomic::AtomicU64>,
+}
+
+/// Outcomes worth a short HUD banner when the app has no visible window
+/// (docs/02 §1 "Draft banner"). The banner never carries text.
+fn banner_for(o: &Outcome) -> bool {
+    matches!(
+        o,
+        Outcome::DraftReady(_)
+            | Outcome::Failed(_)
+            | Outcome::NoSpeech
+            | Outcome::NoUsableText
+            | Outcome::CancelTooLate
+    )
 }
 
 impl Notifier for TauriNotifier {
@@ -171,6 +201,8 @@ impl Notifier for TauriNotifier {
                     .and_then(|st| st.as_ref().map(|st| st.get().ui.show_hud))
             })
             .unwrap_or(true);
+        self.hud_seq
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         if let Some(hud) = self.app.get_webview_window("hud") {
             let _ = if busy && show_hud {
                 hud.show()
@@ -184,6 +216,41 @@ impl Notifier for TauriNotifier {
         let _ = self
             .app
             .emit_to("main", "outcome", OutcomePayload { outcome });
+        let _ = self
+            .app
+            .emit_to("review", "outcome", OutcomePayload { outcome });
+        let show_hud = self
+            .app
+            .try_state::<AppState>()
+            .and_then(|s| {
+                s.store
+                    .lock()
+                    .ok()
+                    .and_then(|st| st.as_ref().map(|st| st.get().ui.show_hud))
+            })
+            .unwrap_or(true);
+        if !show_hud || !banner_for(&outcome) {
+            return;
+        }
+        let _ = self
+            .app
+            .emit_to("hud", "hud_banner", OutcomePayload { outcome });
+        let seq = self
+            .hud_seq
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1;
+        if let Some(hud) = self.app.get_webview_window("hud") {
+            let _ = hud.show();
+        }
+        let (app, hud_seq) = (self.app.clone(), Arc::clone(&self.hud_seq));
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(3500));
+            if hud_seq.load(std::sync::atomic::Ordering::SeqCst) == seq
+                && let Some(hud) = app.get_webview_window("hud")
+            {
+                let _ = hud.hide();
+            }
+        });
     }
 
     fn level(&mut self, level: f32) {
@@ -259,6 +326,7 @@ fn get_snapshot(app: AppHandle, state: State<'_, AppState>) -> Snapshot {
                 id: d.id.to_string(),
                 revision: d.revision,
                 attempted: d.attempted,
+                expires_in_ms: d.expires_in_ms,
             }),
         ready_error: ready.err(),
         accessibility: format!("{:?}", dictation_platform::accessibility_permission()),
@@ -266,6 +334,12 @@ fn get_snapshot(app: AppHandle, state: State<'_, AppState>) -> Snapshot {
         active_model: models::active_model(&state).map(|m| m.id),
         settings_revision,
         settings_note: state.config_note.clone(),
+        onboarding_complete: state
+            .store
+            .lock()
+            .ok()
+            .and_then(|s| s.as_ref().map(|s| s.get().ui.onboarding_complete))
+            .unwrap_or(false),
         shortcuts: ShortcutStatus {
             toggle: name(&state.toggle),
             cancel: name(&state.cancel),
@@ -308,24 +382,36 @@ fn cancel_dictation(state: State<'_, AppState>) {
 /// Settings/review window only (capability-scoped). Opening review revokes
 /// automatic delivery for an in-flight session (docs/04 invariant 9).
 #[tauri::command]
-fn get_draft(state: State<'_, AppState>) -> Option<DraftView> {
+fn get_draft(
+    window: tauri::WebviewWindow,
+    state: State<'_, AppState>,
+) -> Result<Option<DraftView>, String> {
+    draft_window(&window)?;
     state.handle.send(Command::ReviewOpened);
-    state.handle.draft(IPC_TIMEOUT).map(|d| DraftView {
+    let expires_in_ms = state
+        .handle
+        .snapshot(IPC_TIMEOUT)
+        .and_then(|s| s.draft)
+        .map_or(0, |d| d.expires_in_ms);
+    Ok(state.handle.draft(IPC_TIMEOUT).map(|d| DraftView {
         id: d.id.to_string(),
         revision: d.revision,
         text: d.text,
         reason: d.reason,
         attempted: d.attempted,
-    })
+        expires_in_ms,
+    }))
 }
 
 #[tauri::command]
 fn edit_draft(
+    window: tauri::WebviewWindow,
     state: State<'_, AppState>,
     id: String,
     expected_revision: u32,
     text: String,
 ) -> Result<(), String> {
+    draft_window(&window)?;
     state.handle.send(Command::DraftEdit {
         id: parse_id(&id)?,
         expected_revision,
@@ -335,7 +421,13 @@ fn edit_draft(
 }
 
 #[tauri::command]
-fn copy_draft(state: State<'_, AppState>, id: String, revision: u32) -> Result<(), String> {
+fn copy_draft(
+    window: tauri::WebviewWindow,
+    state: State<'_, AppState>,
+    id: String,
+    revision: u32,
+) -> Result<(), String> {
+    draft_window(&window)?;
     state.handle.send(Command::DraftCopy {
         id: parse_id(&id)?,
         revision,
@@ -344,7 +436,12 @@ fn copy_draft(state: State<'_, AppState>, id: String, revision: u32) -> Result<(
 }
 
 #[tauri::command]
-fn discard_draft(state: State<'_, AppState>, id: String) -> Result<(), String> {
+fn discard_draft(
+    window: tauri::WebviewWindow,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), String> {
+    draft_window(&window)?;
     state
         .handle
         .send(Command::DraftDiscard { id: parse_id(&id)? });
@@ -546,7 +643,17 @@ fn on_shortcut(app: &AppHandle, shortcut: &Shortcut, pressed: bool) {
     }
 }
 
-fn show_settings(app: &AppHandle) {
+pub(crate) fn show_review(app: &AppHandle) {
+    if let Some(state) = app.try_state::<AppState>() {
+        state.handle.send(Command::ReviewOpened);
+    }
+    if let Some(w) = app.get_webview_window("review") {
+        let _ = w.show();
+        let _ = w.set_focus(); // deliberate: review takes focus by design
+    }
+}
+
+pub(crate) fn show_settings(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
         let _ = w.set_focus(); // explicit user action from the tray
@@ -616,6 +723,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_settings(app)))
         // Rust-only use (model import picker); no dialog permission is granted to webviews.
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| on_shortcut(app, shortcut, event.state == ShortcutState::Pressed))
@@ -671,7 +779,10 @@ pub fn run() {
                     )),
                     transcriber: Box::new(transcriber),
                     delivery: Box::new(PlatformDelivery::spawn(|| NativePlatform, Arc::clone(&excluded))),
-                    notifier: Box::new(TauriNotifier { app: app.handle().clone() }),
+                    notifier: Box::new(TauriNotifier {
+                        app: app.handle().clone(),
+                        hud_seq: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                    }),
                 },
                 1,
             );
@@ -703,15 +814,17 @@ pub fn run() {
             register_shortcuts(app.handle(), &cfg);
 
             let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
+            let review = MenuItem::with_id(app, "review", "Review text…", true, None::<&str>)?;
             let cancel = MenuItem::with_id(app, "cancel", "Cancel dictation", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit Local Dictation", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&settings, &cancel, &quit_item])?;
+            let menu = Menu::with_items(app, &[&review, &cancel, &settings, &quit_item])?;
             let mut tray = TrayIconBuilder::with_id("main-tray")
                 .tooltip("Local Dictation")
                 .menu(&menu)
                 .show_menu_on_left_click(true)
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "settings" => show_settings(app),
+                    "review" => show_review(app),
                     "cancel" => {
                         if let Some(s) = app.try_state::<AppState>() {
                             s.handle.send(Command::Cancel);
@@ -724,12 +837,13 @@ pub fn run() {
                 tray = tray.icon(icon.clone());
             }
             tray.build(app)?;
+            onboarding::first_run_show(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
             // Closing settings hides it; Quit is explicit from the tray.
             if let WindowEvent::CloseRequested { api, .. } = event
-                && window.label() == "main"
+                && matches!(window.label(), "main" | "review")
             {
                 api.prevent_close();
                 let _ = window.hide();
@@ -757,7 +871,16 @@ pub fn run() {
             models::cancel_model_operation,
             models::remove_model,
             models::activate_model,
-            models::unload_model
+            models::unload_model,
+            onboarding::check_permissions,
+            onboarding::request_permission,
+            onboarding::open_privacy_settings,
+            onboarding::set_shortcut,
+            onboarding::pause_shortcuts,
+            onboarding::resume_shortcuts,
+            onboarding::complete_onboarding,
+            onboarding::set_launch_at_login,
+            onboarding::open_review
         ])
         .run(tauri::generate_context!())
         .expect("error while running Local Dictation");

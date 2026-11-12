@@ -29,6 +29,15 @@
     "allow-cancel-model-operation",
     "allow-remove-model",
     "allow-activate-model",
-    "allow-unload-model"
+    "allow-unload-model",
+    "allow-check-permissions",
+    "allow-request-permission",
+    "allow-open-privacy-settings",
+    "allow-set-shortcut",
+    "allow-pause-shortcuts",
+    "allow-resume-shortcuts",
+    "allow-complete-onboarding",
+    "allow-set-launch-at-login",
+    "allow-open-review"
   ]
 }

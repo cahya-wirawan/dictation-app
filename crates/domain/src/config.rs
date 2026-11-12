@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 const MAX_EXCLUDED_APPS: usize = 64;
 const MAX_STRING: usize = 256;
 
@@ -89,6 +89,10 @@ pub struct UiConfig {
     pub show_hud: bool,
     pub launch_at_login: bool,
     pub locale: String,
+    /// Schema v2. False until the onboarding flow finished (docs/02 §2).
+    pub onboarding_complete: bool,
+    /// Schema v2. In-app preference in addition to the OS setting.
+    pub reduced_motion: bool,
 }
 
 impl Default for Config {
@@ -121,6 +125,8 @@ impl Default for Config {
                 show_hud: true,
                 launch_at_login: false,
                 locale: "en".into(),
+                onboarding_complete: false,
+                reduced_motion: false,
             },
         }
     }
@@ -277,14 +283,35 @@ impl Config {
     }
 }
 
-/// Chain of schema migrations. v1 is current; future versions add steps here.
-fn migrate(value: Value, from: u32) -> Result<Value, ConfigError> {
-    match from {
-        SCHEMA_VERSION => Ok(value),
-        other => Err(ConfigError::Corrupt(format!(
-            "unknown schema_version {other}"
-        ))),
+/// Chain of schema migrations, applied one version at a time.
+fn migrate(mut value: Value, from: u32) -> Result<Value, ConfigError> {
+    let mut version = from;
+    while version < SCHEMA_VERSION {
+        value = match version {
+            1 => v1_to_v2(value)?,
+            other => {
+                return Err(ConfigError::Corrupt(format!(
+                    "unknown schema_version {other}"
+                )));
+            }
+        };
+        version += 1;
     }
+    Ok(value)
+}
+
+/// v2 adds `ui.onboarding_complete` and `ui.reduced_motion`. Users upgrading
+/// from v1 builds (M0-M3 development builds) see onboarding once.
+fn v1_to_v2(mut v: Value) -> Result<Value, ConfigError> {
+    let ui = v
+        .get_mut("ui")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| ConfigError::Corrupt("v1 config without ui".into()))?;
+    ui.entry("onboarding_complete")
+        .or_insert(Value::Bool(false));
+    ui.entry("reduced_motion").or_insert(Value::Bool(false));
+    v["schema_version"] = Value::from(2u32);
+    Ok(v)
 }
 
 fn merge_patch(target: &mut Value, patch: &Value) {
@@ -434,8 +461,8 @@ mod tests {
     #[test]
     fn future_and_corrupt_schemas() {
         assert_eq!(
-            Config::from_json(r#"{"schema_version": 2}"#),
-            Err(ConfigError::FutureSchema(2))
+            Config::from_json(r#"{"schema_version": 3}"#),
+            Err(ConfigError::FutureSchema(3))
         );
         assert!(matches!(
             Config::from_json("{not json"),
@@ -449,6 +476,30 @@ mod tests {
         bad["audio"]["silence_ms"] = json!(5);
         assert!(matches!(
             Config::from_json(&bad.to_string()),
+            Err(ConfigError::Corrupt(_))
+        ));
+    }
+
+    #[test]
+    fn migrates_v1_to_v2() {
+        let v1 = r#"{"schema_version":1,"revision":7,
+            "audio":{"device_id":"coreaudio:mic","silence_ms":1500,"no_speech_timeout_ms":8000,"max_capture_ms":120000},
+            "transcription":{"model_id":"whisper-base-multilingual","language":"de","backend":"auto"},
+            "delivery":{"mode":"copy_only","clipboard_policy":"leave_text","excluded_apps":["com.example.x"]},
+            "shortcuts":{"toggle":"Ctrl+Alt+Space","cancel":"Ctrl+Alt+Escape","paste_draft":null},
+            "ui":{"show_hud":false,"launch_at_login":false,"locale":"en"}}"#;
+        let c = Config::from_json(v1).unwrap();
+        assert_eq!(c.schema_version, 2);
+        assert_eq!(c.revision, 7, "migration keeps the revision");
+        assert_eq!(
+            (c.audio.silence_ms, c.transcription.language.as_str()),
+            (1500, "de")
+        );
+        assert_eq!(c.delivery.mode, DeliveryModeSetting::CopyOnly);
+        assert!(!c.ui.show_hud);
+        assert!(!c.ui.onboarding_complete && !c.ui.reduced_motion);
+        assert!(matches!(
+            Config::from_json(r#"{"schema_version":1,"revision":1}"#),
             Err(ConfigError::Corrupt(_))
         ));
     }
