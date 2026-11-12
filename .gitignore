@@ -73,3 +73,10 @@ docs/_build/
 
 tmp/
 target/
+
+# Local model downloads (never committed; verified by hash at load time)
+.models/
+node_modules/
+src-tauri/gen/
+src-tauri/binaries/
+*.tsbuildinfo

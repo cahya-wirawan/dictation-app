@@ -841,6 +841,14 @@ Accepted. Raw audio is transient; drafts live in memory with TTL. No LLM cleanup
 
 Proposed. English-only models cannot meet multilingual scope. Base is a useful latency/size starting point; Small is a quality candidate. Final model/profile must satisfy held-out language gates and reference-hardware budgets. CPU is baseline; Metal is an optional measured improvement. No invented speed/accuracy claims.
 
+## ADR-010 — earshot neural VAD on 16 ms frames (resolves ADR-004 candidate)
+
+Accepted for M1, pending corpus calibration (12 November 2026, M0 T0.8). The WebRTC VAD candidate failed the maintenance check: the `webrtc-vad` crate's last release is 0.4.0 from October 2019. Replacement: `earshot` 1.2.2 (MIT OR Apache-2.0, pure Rust, no ONNX runtime, ~8 KiB state per detector, released August 2026). It needs 256-sample (16 ms) frames at 16 kHz instead of the 20 ms/320-sample frames assumed in 03 §4, so the endpointer counts 16 ms frames and converts every millisecond setting with ceiling division: pre-roll 300 ms → 19 frames, silence 1000 ms → 63 frames, trailing 200 ms → 13 frames. The onset rule stays three voiced frames within five, which shortens the onset window from 100 ms to 80 ms. A frame counts as voiced only when the score is ≥0.5 and RMS is ≥−50 dBFS. M0 measurements (synthetic plus one public-domain clip, not a corpus): voiced fraction 0.675 on jfk.wav, 0.000 on digital silence, −55 dBFS hiss and a 1 kHz tone, 0.059 on −25 dBFS white noise. Consequence: `SpeechDetector` stays the swap point. Silero or whisper.cpp VAD remain alternatives if the held-out no-speech suite fails.
+
+## ADR-011 — Capture always binds a specific device id
+
+Accepted (M0 T0.2). CPAL 0.18 transparently reroutes a stream opened on the *default* device when the OS route changes (`ErrorKind::DeviceChanged`). That would be a silent microphone substitution, which 11_AGENT_HANDOFF forbids. Capture therefore resolves the current default to its concrete `DeviceId` and opens that device. Disconnect, reroute or xrun is a fault that aborts the session; it never transcribes a truncated recording. Consequence: an OS default-device change during a session ends the session with MIC_DISCONNECTED, and the next session uses the new default.
+
 ## Risk register
 
 | Risk | Likelihood / impact | Mitigation and owner role |
