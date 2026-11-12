@@ -888,6 +888,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "dictation-coordinator"
+version = "0.1.0"
+dependencies = [
+ "dictation-domain",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "dictation-domain"
 version = "0.1.0"
 dependencies = [
