@@ -1,0 +1,2 @@
+# Smoke corpus only: one public-domain English sample. Not the docs/08 §3 release corpus.
+../../../vendor/whisper.cpp/samples/jfk.wav	en	And so, my fellow Americans, ask not what your country can do for you, ask what you can do for your country.

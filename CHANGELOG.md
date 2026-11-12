@@ -17,6 +17,25 @@ All notable changes to Local Dictation are documented here. The format follows [
 
 ## [Unreleased]
 
+Milestone M5 (hardening and release tooling).
+
+### Added
+
+- **Sleep, lock, user switch and logout** cancel any session and clear the draft on macOS. Nothing is pasted after wake.
+- **Support report:** Settings → About shows a redacted diagnostics report. You preview it, then save it through a native dialog. It holds versions, settings values, status codes and timings, never text, audio, names or paths.
+- **Tray status:** the menu bar tooltip shows Ready, Listening, Transcribing, Setup needed and other states.
+- **`dictation-bench`:**
+  - corpus WER/CER under a fixed normalization policy, with latency median, p95 and max, cold starts and worker RSS;
+  - a synthetic no-speech suite, run end to end through the worker;
+  - a real-worker soak with hard kills.
+- **Coordinator soak test:** 500 mixed sessions, including cancels, worker restarts and device faults.
+- **Release tooling:**
+  - hardened runtime and an audio-input-only entitlement;
+  - ad-hoc signed DMG by default, Developer ID signing and notarization when the release secrets exist;
+  - `scripts/verify-macos-bundle.sh` and a tag-triggered draft-release workflow.
+- **Licenses and SBOM:** `THIRD_PARTY_NOTICES.md` is generated from the shipped dependency graph and bundled in the app. A CycloneDX SBOM is produced, and CI enforces a permissive-license policy.
+- **Docs:** user help (`docs/SUPPORT.md`) and the release procedure and checklist (`docs/RELEASE.md`).
+
 ## [0.5.0] - 2026-11-12
 
 Milestone M4 (product UI) is complete.

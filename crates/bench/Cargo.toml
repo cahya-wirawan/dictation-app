@@ -1,0 +1,24 @@
+[package]
+name = "dictation-bench"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Release benchmarks: corpus WER/CER and latency, no-speech suite, real-worker soak (docs/08)"
+
+[[bin]]
+name = "dictation-bench"
+path = "src/main.rs"
+
+[dependencies]
+dictation-domain.workspace = true
+dictation-audio.workspace = true
+transcription-protocol.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+hound.workspace = true
+unicode-normalization = "0.1"
+
+[lints]
+workspace = true

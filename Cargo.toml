@@ -8,6 +8,7 @@ members = [
     "crates/platform",
     "crates/coordinator",
     "crates/models",
+    "crates/bench",
     "src-tauri",
 ]
 # src-tauri needs webkit2gtk/gtk on Linux; keep plain `cargo build/test` usable
@@ -20,6 +21,7 @@ default-members = [
     "crates/platform",
     "crates/coordinator",
     "crates/models",
+    "crates/bench",
 ]
 
 [workspace.package]

@@ -12,6 +12,7 @@ dictation-domain.workspace = true
 dictation-audio.workspace = true
 dictation-platform.workspace = true
 transcription-protocol.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 

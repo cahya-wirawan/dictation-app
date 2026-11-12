@@ -12,7 +12,9 @@
     "tauri": "tauri",
     "version:check": "node scripts/version.mjs check",
     "version:bump": "node scripts/version.mjs bump",
-    "test": "vitest run"
+    "test": "vitest run",
+    "notices": "node scripts/notices.mjs",
+    "notices:check": "node scripts/notices.mjs --check"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.4",
