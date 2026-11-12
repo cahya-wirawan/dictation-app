@@ -39,11 +39,16 @@ fn main() {
         cfg.define("CMAKE_OSX_DEPLOYMENT_TARGET", &min);
     }
     if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
-        // cc's defaults for a debug Rust profile include `-Od`, which MSVC
-        // applies after CMake's Release `/O2` and leaves ggml unoptimized
-        // (60 s+ for the 11 s fixture). CMake's own Release flags (/O2 /MD)
-        // already match Rust's CRT.
+        // The cmake crate replaces CMake's MSVC Release flags with its own
+        // (`CMAKE_C_FLAGS_RELEASE= -W0`), so ggml was built unoptimized:
+        // > 50 s for the 11 s fixture. Drop cc's debug-profile defaults and
+        // state the optimization explicitly. The CRT stays /MD (CMake's
+        // default), matching Rust.
         cfg.no_default_flags(true);
+        for f in ["/O2", "/Ob2", "/DNDEBUG"] {
+            cfg.cflag(f);
+            cfg.cxxflag(f);
+        }
     }
     if native == "OFF" && target_arch == "x86_64" {
         // Portable x86 baseline = x86-64-v3 (Haswell, 2013+). Without this ggml
