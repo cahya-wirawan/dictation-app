@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-run-worker-selftest"
+description = "Enables the run_worker_selftest command without any pre-configured scope."
+commands.allow = ["run_worker_selftest"]
+
+[[permission]]
+identifier = "deny-run-worker-selftest"
+description = "Denies the run_worker_selftest command without any pre-configured scope."
+commands.deny = ["run_worker_selftest"]

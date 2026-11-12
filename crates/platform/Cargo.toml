@@ -1,0 +1,32 @@
+[package]
+name = "dictation-platform"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Target probe, permissions, clipboard and input backends (docs/05)"
+
+[features]
+# Enables the development-only fixed-text paste probe (M0 T0.6). Never enable
+# in release builds; there is no IPC path to it either way.
+m0-diagnostics = []
+
+[dependencies]
+thiserror.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "=0.6.5"
+objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSString", "NSDate"] }
+objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "libc", "NSWorkspace", "NSRunningApplication", "NSPasteboard"] }
+objc2-core-foundation = { version = "=0.3.2", default-features = false, features = ["std", "CFString", "CFBase"] }
+objc2-application-services = { version = "=0.3.2", default-features = false, features = ["std", "libc", "HIServices", "AXUIElement", "AXError"] }
+objc2-core-graphics = { version = "=0.3.2", default-features = false, features = ["std", "CGEvent", "CGEventTypes", "CGRemoteOperation", "CGEventSource"] }
+libc = "0.2"
+
+[[example]]
+name = "m0_paste_probe"
+required-features = ["m0-diagnostics"]
+
+[lints]
+workspace = true
