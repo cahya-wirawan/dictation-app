@@ -38,6 +38,13 @@ fn main() {
         let min = env::var("MACOSX_DEPLOYMENT_TARGET").unwrap_or_else(|_| "13.0".into());
         cfg.define("CMAKE_OSX_DEPLOYMENT_TARGET", &min);
     }
+    if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        // cc's defaults for a debug Rust profile include `-Od`, which MSVC
+        // applies after CMake's Release `/O2` and leaves ggml unoptimized
+        // (60 s+ for the 11 s fixture). CMake's own Release flags (/O2 /MD)
+        // already match Rust's CRT.
+        cfg.no_default_flags(true);
+    }
     if native == "OFF" && target_arch == "x86_64" {
         // Portable x86 baseline = x86-64-v3 (Haswell, 2013+). Without this ggml
         // falls back to SSE-only code, ~11x slower on the JFK fixture.

@@ -110,6 +110,10 @@ jobs:
       - name: clippy (workspace incl. src-tauri, all features)
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
+      - name: Worker inference timing first (Windows)
+        if: runner.os == 'Windows'
+        run: cargo test -p transcription-worker --test worker_process jfk -- --nocapture
+
       - name: Tests (incl. real whisper.cpp inference on the JFK fixture)
         run: cargo test --workspace -- --nocapture 2>&1 | tee test-output.txt
 
