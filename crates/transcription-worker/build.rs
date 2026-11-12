@@ -37,7 +37,13 @@ fn main() {
     if native == "OFF" && target_arch == "x86_64" {
         // Portable x86 baseline = x86-64-v3 (Haswell, 2013+). Without this ggml
         // falls back to SSE-only code, ~11x slower on the JFK fixture.
-        for opt in ["GGML_AVX", "GGML_AVX2", "GGML_FMA", "GGML_F16C", "GGML_BMI2"] {
+        for opt in [
+            "GGML_AVX",
+            "GGML_AVX2",
+            "GGML_FMA",
+            "GGML_F16C",
+            "GGML_BMI2",
+        ] {
             cfg.define(opt, "ON");
         }
     }
