@@ -84,7 +84,7 @@ These are **smoke measurements**, not release evidence. The corpus is a single p
 | No-speech suite (29 synthetic cases): endpointer accepts | 6 / 29 | 6 / 29 |
 | No-speech suite: automated insertions (non-empty text) | **0 / 29** (95% upper bound 9.8%) | **0 / 29** |
 | DSP time per 10 ms block: median / p95 | 9.7 / 14.2 µs | 6.0 / 6.4 µs |
-| Real-worker soak, 500 sessions | SOAK_LINUX | 174 s; 451 jobs, 49 hard kills + respawns, **0 orphans**; 3 s clip median 317 / p95 501 ms; worker RSS flat at about 248 MB (trend −0.0%) |
+| Real-worker soak, 500 sessions | 1590 s; 451 jobs, 49 hard kills + respawns, **0 orphans**; 3 s clip median 1050 / p95 11249 ms (host shared with other users, load average about 18 on 8 threads, so latency is not meaningful); worker RSS flat at about 245 MB (trend +0.0%) | 174 s; 451 jobs, 49 hard kills + respawns, **0 orphans**; 3 s clip median 317 / p95 501 ms; worker RSS flat at about 248 MB (trend −0.0%) |
 
 The raw WER of 4.5% is a single token: the reference has "so," and the hypothesis has "so".
 
