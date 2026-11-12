@@ -5,6 +5,7 @@
 //! other and never paste on their own.
 
 use std::collections::{HashMap, VecDeque};
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -17,6 +18,14 @@ use dictation_domain::{Generation, Phase, SessionId, WorkerEpoch};
 
 /// How often the actor ticks for draft expiry when idle.
 const TICK: Duration = Duration::from_secs(1);
+
+/// The model a worker loads: an app-owned absolute path plus the approved
+/// hash from the bundled manifest (the worker re-verifies while loading).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelRef {
+    pub path: PathBuf,
+    pub sha256: String,
+}
 
 /// Events adapters send back to the actor.
 #[derive(Debug)]
@@ -74,6 +83,10 @@ pub enum AdapterEvent {
         revision: u32,
         ok: bool,
     },
+    /// A model switch finished: on success, the new worker's epoch.
+    ModelSwitched {
+        result: Result<WorkerEpoch, AppError>,
+    },
 }
 
 /// Opens and closes the microphone. Exactly one terminal event
@@ -95,6 +108,18 @@ pub trait TranscriberAdapter: Send {
     /// Hard cancel: kill the worker, discard the job, begin respawning.
     /// Returns the epoch the replacement worker will use.
     fn kill(&mut self) -> WorkerEpoch;
+    /// Load `model` in a fresh worker, smoke-test it, then swap it in.
+    /// Reports `ModelSwitched`. The previous model keeps serving on failure.
+    fn switch_model(&mut self, model: ModelRef, events: Sender<Msg>) {
+        let _ = model;
+        let _ = events.send(Msg::Adapter(AdapterEvent::ModelSwitched {
+            result: Ok(self.kill()),
+        }));
+    }
+    /// Explicit unload: stop the worker and forget the model.
+    fn unload(&mut self) -> WorkerEpoch {
+        self.kill()
+    }
 }
 
 pub trait DeliveryAdapter: Send {
@@ -150,6 +175,14 @@ pub enum Command {
     SetAutoDelivery(bool),
     /// Readiness for new sessions (model installed, worker up, …).
     SetReady(Result<(), AppError>),
+    /// Activate another model; only while no session is in flight.
+    SwitchModel {
+        model: ModelRef,
+        reply: Sender<Result<(), AppError>>,
+    },
+    UnloadModel {
+        reply: Sender<Result<(), AppError>>,
+    },
     Snapshot(Sender<Snapshot>),
     /// Review window only: the draft including its text.
     GetDraft(Sender<Option<Draft>>),
@@ -178,6 +211,7 @@ pub struct Snapshot {
     pub worker_epoch: WorkerEpoch,
     /// True while the microphone is open (for "no idle capture" checks).
     pub capture_open: bool,
+    pub switching_model: bool,
 }
 
 pub struct Adapters {
@@ -267,6 +301,8 @@ struct Actor {
     /// every effect of the current input, so notifications stay in order.
     queue: VecDeque<Input>,
     stepping: bool,
+    /// Pending model switch reply; new sessions are refused meanwhile.
+    switching: Option<Sender<Result<(), AppError>>>,
 }
 
 impl Actor {
@@ -282,6 +318,7 @@ impl Actor {
             ready: Ok(()),
             queue: VecDeque::new(),
             stepping: false,
+            switching: None,
         }
     }
 
@@ -311,6 +348,12 @@ impl Actor {
 
     fn command(&mut self, c: Command) {
         match c {
+            Command::Toggle
+                if self.switching.is_some()
+                    && matches!(self.machine.phase(), Phase::Idle | Phase::DraftReady) =>
+            {
+                self.a.notifier.outcome(Outcome::Rejected(AppError::Busy));
+            }
             Command::Toggle => match self.machine.phase() {
                 Phase::Idle | Phase::DraftReady => self.start(),
                 Phase::Starting | Phase::Listening => {
@@ -346,6 +389,27 @@ impl Actor {
             Command::Suspend => self.step(Input::Suspend),
             Command::SetAutoDelivery(on) => self.auto_delivery = on,
             Command::SetReady(r) => self.ready = r,
+            Command::SwitchModel { model, reply } => {
+                if self.switching.is_some()
+                    || !matches!(self.machine.phase(), Phase::Idle | Phase::DraftReady)
+                {
+                    let _ = reply.send(Err(AppError::Busy));
+                } else {
+                    self.switching = Some(reply);
+                    self.a.transcriber.switch_model(model, self.tx.clone());
+                }
+            }
+            Command::UnloadModel { reply } => {
+                if self.switching.is_some()
+                    || !matches!(self.machine.phase(), Phase::Idle | Phase::DraftReady)
+                {
+                    let _ = reply.send(Err(AppError::Busy));
+                } else {
+                    let epoch = self.a.transcriber.unload();
+                    self.step(Input::WorkerEpochChanged { epoch });
+                    let _ = reply.send(Ok(()));
+                }
+            }
             Command::Snapshot(reply) => {
                 let _ = reply.send(Snapshot {
                     phase: self.machine.phase(),
@@ -358,6 +422,7 @@ impl Actor {
                     }),
                     worker_epoch: self.machine.worker_epoch(),
                     capture_open: self.capture_open.is_some(),
+                    switching_model: self.switching.is_some(),
                 });
             }
             Command::GetDraft(reply) => {
@@ -472,6 +537,14 @@ impl Actor {
             }),
             AdapterEvent::CopyFinished { id, revision, ok } => {
                 self.step(Input::DraftCopyFinished { id, revision, ok })
+            }
+            AdapterEvent::ModelSwitched { result } => {
+                if let Ok(epoch) = result {
+                    self.step(Input::WorkerEpochChanged { epoch });
+                }
+                if let Some(reply) = self.switching.take() {
+                    let _ = reply.send(result.map(|_| ()));
+                }
             }
         }
     }

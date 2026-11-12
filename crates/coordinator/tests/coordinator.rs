@@ -131,6 +131,16 @@ impl TranscriberAdapter for FakeWorker {
         self.epoch += 1;
         self.epoch
     }
+    fn switch_model(&mut self, _model: ModelRef, events: Sender<Msg>) {
+        self.epoch += 1;
+        let epoch = self.epoch;
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            let _ = events.send(Msg::Adapter(AdapterEvent::ModelSwitched {
+                result: Ok(epoch),
+            }));
+        });
+    }
 }
 
 #[derive(Default)]
@@ -503,8 +513,10 @@ fn real_worker_cfg() -> Option<WorkerConfig> {
     }
     Some(WorkerConfig {
         exe,
-        model,
-        model_sha256: BASE_SHA256.into(),
+        model: Arc::new(Mutex::new(Some(ModelRef {
+            path: model,
+            sha256: BASE_SHA256.into(),
+        }))),
         language: Arc::new(Mutex::new(Language::try_from("en".to_string()).unwrap())),
         job_timeout: Duration::from_secs(60),
     })
@@ -570,4 +582,118 @@ fn real_worker_end_to_end_and_cancel_respawn() {
     r.assert_mic_closed();
     let _ = SessionId::random(); // keep import used on all cfgs
     let _ = AtomicBool::new(false);
+}
+
+fn switch(h: &CoordinatorHandle, model: ModelRef) -> mpsc::Receiver<Result<(), AppError>> {
+    let (tx, rx) = mpsc::channel();
+    h.send(Command::SwitchModel { model, reply: tx });
+    rx
+}
+
+fn dummy_model() -> ModelRef {
+    ModelRef {
+        path: PathBuf::from("/nonexistent/model.bin"),
+        sha256: "0".repeat(64),
+    }
+}
+
+#[test]
+fn model_switch_is_exclusive_with_sessions() {
+    let (w, _, _) = fake_worker("t", Duration::ZERO);
+    let r = Rig::new(jfk(), 16, None, EndpointConfig::default(), w);
+    // While listening: refused.
+    r.h.send(Command::Toggle);
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(
+        switch(&r.h, dummy_model()).recv_timeout(T).unwrap(),
+        Err(AppError::Busy)
+    );
+    r.h.send(Command::Cancel);
+    assert_eq!(r.next_outcome(), Outcome::Canceled);
+    // While switching: starting is refused.
+    let pending = switch(&r.h, dummy_model());
+    std::thread::sleep(Duration::from_millis(50));
+    assert!(r.snapshot().switching_model);
+    r.h.send(Command::Toggle);
+    assert_eq!(r.next_outcome(), Outcome::Rejected(AppError::Busy));
+    assert_eq!(pending.recv_timeout(T).unwrap(), Ok(()));
+    assert!(!r.snapshot().switching_model);
+    assert_eq!(
+        r.snapshot().worker_epoch,
+        1,
+        "a successful switch advances the epoch (cancel while listening does not kill the worker)"
+    );
+    r.assert_mic_closed();
+}
+
+#[test]
+fn real_worker_model_switch_keeps_previous_on_failure_and_unload() {
+    let Some(cfg) = real_worker_cfg() else { return };
+    let good = cfg.model.lock().unwrap().clone().unwrap();
+    let mut audio: Vec<f32> = jfk().into_iter().take(16_000 * 2 + 4_000).collect();
+    audio.extend(vec![0.0; 16_000 * 2]);
+    let r = Rig::new(
+        audio,
+        4_000,
+        None,
+        EndpointConfig::default(),
+        Box::new(WorkerTranscriber::new(cfg, 0)),
+    );
+
+    // A tampered hash never becomes active.
+    let bad = ModelRef {
+        sha256: "0".repeat(64),
+        ..good.clone()
+    };
+    assert_eq!(
+        switch(&r.h, bad)
+            .recv_timeout(Duration::from_secs(120))
+            .unwrap(),
+        Err(AppError::ModelInvalid)
+    );
+    assert_eq!(
+        r.snapshot().worker_epoch,
+        0,
+        "failed switch keeps the old worker and epoch"
+    );
+    r.h.send(Command::Toggle);
+    assert_eq!(
+        r.next_outcome(),
+        Outcome::DraftReady(DraftReason::ReviewMode)
+    );
+    assert!(normalize(&r.h.draft(T).unwrap().text).contains("fellow americans"));
+    r.h.send(Command::DraftDiscard {
+        id: r.h.draft(T).unwrap().id,
+    });
+    assert_eq!(r.next_outcome(), Outcome::DraftDiscarded);
+
+    // A valid switch (re-activating the same model) loads, smoke-tests and swaps.
+    assert_eq!(
+        switch(&r.h, good)
+            .recv_timeout(Duration::from_secs(120))
+            .unwrap(),
+        Ok(())
+    );
+    let epoch = r.snapshot().worker_epoch;
+    assert!(epoch >= 1);
+    r.h.send(Command::Toggle);
+    assert_eq!(
+        r.next_outcome(),
+        Outcome::DraftReady(DraftReason::ReviewMode)
+    );
+    r.h.send(Command::DraftDiscard {
+        id: r.h.draft(T).unwrap().id,
+    });
+    assert_eq!(r.next_outcome(), Outcome::DraftDiscarded);
+
+    // Unload: the next session cannot transcribe.
+    let (tx, rx) = mpsc::channel();
+    r.h.send(Command::UnloadModel { reply: tx });
+    assert_eq!(rx.recv_timeout(T).unwrap(), Ok(()));
+    r.h.send(Command::Toggle);
+    assert_eq!(
+        r.next_outcome(),
+        Outcome::Failed(AppError::ModelUnavailable)
+    );
+    r.assert_mic_closed();
 }

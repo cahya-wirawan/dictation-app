@@ -1,0 +1,25 @@
+[package]
+name = "dictation-models"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Approved model manifest, verified download/import and atomic install (docs/03 §6, B4)"
+
+[features]
+default = ["http"]
+# Real HTTPS fetcher. Tests use an in-memory fake.
+http = ["dep:ureq"]
+
+[dependencies]
+sha2.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+ureq = { version = "=3.4.2", default-features = false, features = ["rustls"], optional = true }
+
+[dev-dependencies]
+sha2.workspace = true
+
+[lints]
+workspace = true

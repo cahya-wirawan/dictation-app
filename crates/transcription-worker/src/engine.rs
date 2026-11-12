@@ -1,6 +1,8 @@
 //! Safe wrapper around the C shim. One context, one job at a time.
 
-use std::ffi::{CStr, CString, c_char, c_float, c_int};
+use std::ffi::{CStr, CString, c_char, c_float, c_int, c_void};
+use std::fs::File;
+use std::io::Read;
 use std::ptr::NonNull;
 
 #[repr(C)]
@@ -10,7 +12,12 @@ struct WhisperContext {
 
 unsafe extern "C" {
     fn dw_silence_logs();
-    fn dw_init(path_model: *const c_char, use_gpu: c_int) -> *mut WhisperContext;
+    fn dw_init_from_loader(
+        ctx: *mut c_void,
+        read: unsafe extern "C" fn(*mut c_void, *mut c_void, usize) -> usize,
+        eof: unsafe extern "C" fn(*mut c_void) -> bool,
+        use_gpu: c_int,
+    ) -> *mut WhisperContext;
     fn dw_transcribe(
         ctx: *mut WhisperContext,
         pcm: *const c_float,
@@ -42,9 +49,13 @@ pub struct RawTranscript {
 }
 
 impl Engine {
-    pub fn load(path: &CStr, use_gpu: bool) -> Option<Self> {
-        // SAFETY: path is a valid NUL-terminated string; returns null on failure.
-        let ctx = unsafe { dw_init(path.as_ptr(), c_int::from(use_gpu)) };
+    /// Loads from `reader`, which hashes every byte whisper.cpp consumes.
+    /// The caller must verify the digest before using the engine.
+    pub fn load_from(reader: &mut HashingReader, use_gpu: bool) -> Option<Self> {
+        let ctx_ptr = (reader as *mut HashingReader).cast::<c_void>();
+        // SAFETY: `reader` outlives the call; the callbacks only access it
+        // through this pointer, and whisper.cpp does not retain the loader.
+        let ctx = unsafe { dw_init_from_loader(ctx_ptr, read_cb, eof_cb, c_int::from(use_gpu)) };
         NonNull::new(ctx).map(|ctx| Self { ctx })
     }
 
@@ -107,6 +118,86 @@ impl Drop for Engine {
         // SAFETY: ctx came from whisper_init and is freed exactly once.
         unsafe { whisper_free(self.ctx.as_ptr()) }
     }
+}
+
+/// Reads one already-open file for whisper.cpp while hashing it.
+pub struct HashingReader {
+    file: File,
+    hasher: sha2::Sha256,
+    pub total: u64,
+    eof: bool,
+    pub failed: bool,
+}
+
+impl HashingReader {
+    pub fn new(file: File) -> Self {
+        use sha2::Digest;
+        Self {
+            file,
+            hasher: sha2::Sha256::new(),
+            total: 0,
+            eof: false,
+            failed: false,
+        }
+    }
+
+    /// Hashes whatever whisper.cpp did not read, then returns the digest.
+    pub fn finish(mut self) -> Option<String> {
+        use sha2::Digest;
+        let mut buf = vec![0u8; 1 << 20];
+        loop {
+            match self.file.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    self.hasher.update(&buf[..n]);
+                    self.total += n as u64;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(_) => return None,
+            }
+        }
+        if self.failed {
+            return None;
+        }
+        Some(
+            self.hasher
+                .finalize()
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect(),
+        )
+    }
+}
+
+unsafe extern "C" fn read_cb(ctx: *mut c_void, out: *mut c_void, n: usize) -> usize {
+    use sha2::Digest;
+    // SAFETY: ctx is the HashingReader passed to load_from; out has n bytes.
+    let r = unsafe { &mut *ctx.cast::<HashingReader>() };
+    let buf = unsafe { std::slice::from_raw_parts_mut(out.cast::<u8>(), n) };
+    let mut filled = 0;
+    while filled < n {
+        match r.file.read(&mut buf[filled..]) {
+            Ok(0) => {
+                r.eof = true;
+                break;
+            }
+            Ok(k) => filled += k,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(_) => {
+                r.failed = true;
+                r.eof = true;
+                break;
+            }
+        }
+    }
+    r.hasher.update(&buf[..filled]);
+    r.total += filled as u64;
+    filled
+}
+
+unsafe extern "C" fn eof_cb(ctx: *mut c_void) -> bool {
+    // SAFETY: as in read_cb.
+    unsafe { (*ctx.cast::<HashingReader>()).eof }
 }
 
 /// Strip control characters except tab/newline and trim outer whitespace.

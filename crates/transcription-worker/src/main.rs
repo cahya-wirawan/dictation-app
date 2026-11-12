@@ -5,17 +5,15 @@
 
 mod engine;
 
-use std::ffi::CString;
 use std::fs::File;
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::path::Path;
 use std::process::ExitCode;
 use std::time::Instant;
 
-use sha2::{Digest, Sha256};
 use transcription_protocol::*;
 
-use engine::{Engine, sanitize};
+use engine::{Engine, HashingReader, sanitize};
 
 /// Generous upper bound for any approved Whisper model file.
 const MAX_MODEL_BYTES: u64 = 4 * 1024 * 1024 * 1024;
@@ -165,36 +163,51 @@ fn err(job: JobId, code: WorkerErrorCode, detail: &str) -> FromWorker {
     }
 }
 
-/// Re-verifies the parent's choice: regular file (no symlink), bounded size,
-/// matching SHA-256, then loads from the same path.
+/// Opens the model once (refusing symlinks), lets whisper.cpp load from that
+/// descriptor while hashing every byte, and accepts the context only if the
+/// size and SHA-256 match. No path is reopened, so there is no window to swap
+/// the file between verification and load.
 fn load_verified(path: &Path, expected: &str) -> Result<Engine, (WorkerErrorCode, String)> {
     let invalid = |d: &str| (WorkerErrorCode::ModelInvalid, d.to_string());
-    let meta = std::fs::symlink_metadata(path).map_err(|_| invalid("model not readable"))?;
+    let file = open_no_follow(path).map_err(|_| invalid("model not readable (or a symlink)"))?;
+    let meta = file.metadata().map_err(|_| invalid("model not readable"))?;
     if !meta.file_type().is_file() {
         return Err(invalid("model path is not a regular file"));
     }
     if meta.len() == 0 || meta.len() > MAX_MODEL_BYTES {
         return Err(invalid("model size out of range"));
     }
-    let mut f = File::open(path).map_err(|_| invalid("model not readable"))?;
-    let mut h = Sha256::new();
-    let mut buf = vec![0u8; 1 << 20];
-    loop {
-        let n = f.read(&mut buf).map_err(|_| invalid("model read failed"))?;
-        if n == 0 {
-            break;
-        }
-        h.update(&buf[..n]);
+    let mut reader = HashingReader::new(file);
+    let engine = Engine::load_from(
+        &mut reader,
+        cfg!(all(feature = "metal", target_os = "macos")),
+    );
+    let digest = reader.finish();
+    match (engine, digest) {
+        (_, None) => Err(invalid("model read failed")),
+        (_, Some(d)) if d != expected => Err(invalid("model hash mismatch")), // engine dropped here
+        (None, Some(_)) => Err((
+            WorkerErrorCode::ModelLoadFailed,
+            "whisper.cpp could not load model".into(),
+        )),
+        (Some(e), Some(_)) => Ok(e),
     }
-    let got: String = h.finalize().iter().map(|b| format!("{b:02x}")).collect();
-    if got != expected {
-        return Err(invalid("model hash mismatch"));
+}
+
+#[cfg(unix)]
+fn open_no_follow(path: &Path) -> std::io::Result<File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+}
+
+#[cfg(not(unix))]
+fn open_no_follow(path: &Path) -> std::io::Result<File> {
+    let meta = std::fs::symlink_metadata(path)?;
+    if !meta.file_type().is_file() {
+        return Err(std::io::Error::other("not a regular file"));
     }
-    // Residual TOCTOU window between hash and load is documented in
-    // IMPLEMENTATION_STATUS.md; the model directory is app-private.
-    let c = CString::new(path.as_os_str().as_encoded_bytes()).map_err(|_| invalid("bad path"))?;
-    Engine::load(&c, cfg!(all(feature = "metal", target_os = "macos"))).ok_or((
-        WorkerErrorCode::ModelLoadFailed,
-        "whisper.cpp could not load model".into(),
-    ))
+    File::open(path)
 }
