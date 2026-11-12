@@ -33,6 +33,7 @@ DICTATION_MODEL_PATH=$PWD/.models/ggml-base.bin pnpm tauri dev
 - Release worker builds must set `DICTATION_GGML_NATIVE=OFF`; the default `ON` tunes ggml to the build machine's CPU.
 - Building src-tauri on a Linux machine without webkit2gtk/gtk3/libsoup3 fails at pkg-config. For a type-check only, point `PKG_CONFIG_PATH` at stub `.pc` files (see IMPLEMENTATION_STATUS.md); never link or ship that way.
 - Manual M0 probes on macOS: `examples/mic_probe.rs` (audio), `examples/m0_target_probe.rs` and `examples/m0_paste_probe.rs` (platform; the paste probe requires `--features m0-diagnostics` and must never become an IPC command).
+- Versioning: SemVer, with a single source in `[workspace.package].version` (crates use `version.workspace = true`, Tauri inherits it, and `package.json` mirrors it). Never edit versions by hand. Add entries under `## [Unreleased]` in `CHANGELOG.md` as you make user-visible changes; `pnpm version:bump <major|minor|patch|X.Y.Z>` cuts a release, and `pnpm version:check` verifies everything agrees. Pre-1.0 policy and the separately versioned contracts (worker `PROTOCOL_VERSION`, config `schema_version`, event `schemaVersion`) are described at the top of CHANGELOG.md.
 - Integration test files start with `#![allow(clippy::unwrap_used, ...)]`; the workspace warns on unwrap/expect/panic in non-test code.
 
 ## Spec documents

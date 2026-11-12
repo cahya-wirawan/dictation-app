@@ -1,7 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Local Dictation",
-  "version": "0.0.0",
   "identifier": "app.localdictation.m0",
   "build": {
     "beforeDevCommand": "pnpm dev",
