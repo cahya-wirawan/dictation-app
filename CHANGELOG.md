@@ -17,6 +17,10 @@ All notable changes to Local Dictation are documented here. The format follows [
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-12
+
+Milestone M1 (domain and capture) is complete: the app dictates into a copyable draft. Automatic paste is not enabled yet (M3). The M1 run on the Mac in a GUI session is still pending; see `docs/IMPLEMENTATION_STATUS.md`.
+
 ### Added
 
 - **CI** (`.github/workflows/ci.yml`), with every action pinned to a commit SHA:
@@ -90,5 +94,6 @@ Milestone M0 feasibility spike, partially complete. See `docs/IMPLEMENTATION_STA
 - No dictation session flow yet: there is no coordinator, config persistence, model manager or onboarding (milestone M1 and later).
 - Performance numbers so far come from a Linux x86_64 development host, not the reference hardware.
 
-[Unreleased]: https://github.com/cahya-wirawan/dictation-app/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/cahya-wirawan/dictation-app/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/cahya-wirawan/dictation-app/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/cahya-wirawan/dictation-app/releases/tag/v0.1.0
