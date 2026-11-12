@@ -9,6 +9,7 @@
 //! one validated clipboard + paste transaction per session, or a memory-only
 //! draft when the target cannot be validated.
 
+mod diagnostics;
 mod mictest;
 mod models;
 mod onboarding;
@@ -28,6 +29,7 @@ use dictation_coordinator::adapters::{
 };
 use dictation_coordinator::config_store::{ConfigStore, LoadOutcome};
 use dictation_coordinator::delivery::{NativePlatform, PlatformDelivery, SharedExclusions};
+use dictation_coordinator::diagnostics::{Diagnostics, RecordingNotifier};
 use dictation_domain::chord::ChordFilter;
 use dictation_domain::config::Config;
 use dictation_domain::config::DeliveryModeSetting;
@@ -66,6 +68,7 @@ pub(crate) struct AppState {
     shortcut_error: Mutex<Option<String>>,
     mic_test: Mutex<Option<MicTest>>,
     last_probe: Mutex<Option<ProbeReport>>,
+    pub(crate) diagnostics: Arc<Diagnostics>,
 }
 
 #[derive(Clone, Serialize)]
@@ -203,6 +206,7 @@ impl Notifier for TauriNotifier {
             .unwrap_or(true);
         self.hud_seq
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        update_tray_status(&self.app, Some(phase));
         if let Some(hud) = self.app.get_webview_window("hud") {
             let _ = if busy && show_hud {
                 hud.show()
@@ -260,7 +264,7 @@ impl Notifier for TauriNotifier {
 
 /// Readiness for new sessions: worker binary present and an active model
 /// that is still installed with the approved size.
-fn readiness(state: &AppState) -> Result<(), AppError> {
+pub(crate) fn readiness(state: &AppState) -> Result<(), AppError> {
     if selftest::worker_path().is_none() {
         return Err(AppError::NotReady);
     }
@@ -273,6 +277,29 @@ fn readiness(state: &AppState) -> Result<(), AppError> {
 
 pub(crate) fn refresh_readiness(state: &AppState) {
     state.handle.send(Command::SetReady(readiness(state)));
+}
+
+/// Tray tooltip mirrors the coordinator phase and readiness, so the state is
+/// visible without opening a window (docs/02 §1). Never contains text.
+pub(crate) fn update_tray_status(app: &AppHandle, phase: Option<Phase>) {
+    let Some(tray) = app.tray_by_id("main-tray") else {
+        return;
+    };
+    let ready = app.try_state::<AppState>().map(|s| readiness(&s));
+    let status = match phase {
+        Some(Phase::Starting | Phase::Listening) => "Listening…",
+        Some(Phase::Finalizing | Phase::Transcribing) => "Transcribing…",
+        Some(Phase::Delivering) => "Pasting…",
+        Some(Phase::DraftReady) => "Text ready to review",
+        Some(Phase::Recovering) => "Recovering…",
+        Some(Phase::Idle) | None => match ready {
+            Some(Ok(())) => "Ready",
+            Some(Err(AppError::ModelUnavailable)) => "Setup needed: install a model",
+            Some(Err(AppError::ModelInvalid)) => "Model needs attention",
+            _ => "Not ready",
+        },
+    };
+    let _ = tray.set_tooltip(Some(format!("Local Dictation — {status}")));
 }
 
 fn endpoint_from(cfg: &Config) -> EndpointConfig {
@@ -760,6 +787,7 @@ pub fn run() {
             }));
             let language = Arc::new(Mutex::new(language_from(&cfg)));
             let excluded: SharedExclusions = Arc::new(Mutex::new(cfg.delivery.excluded_apps.clone()));
+            let diagnostics = Diagnostics::new();
             let transcriber = WorkerTranscriber::new(
                 WorkerConfig {
                     exe: selftest::worker_path().unwrap_or_default(),
@@ -768,7 +796,8 @@ pub fn run() {
                     job_timeout: Duration::from_secs(60),
                 },
                 1,
-            );
+            )
+            .with_diagnostics(Arc::clone(&diagnostics));
             let coordinator = Coordinator::spawn(
                 Adapters {
                     capture: Box::new(DspCapture::new(
@@ -779,14 +808,33 @@ pub fn run() {
                     )),
                     transcriber: Box::new(transcriber),
                     delivery: Box::new(PlatformDelivery::spawn(|| NativePlatform, Arc::clone(&excluded))),
-                    notifier: Box::new(TauriNotifier {
-                        app: app.handle().clone(),
-                        hud_seq: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                    notifier: Box::new(RecordingNotifier {
+                        inner: TauriNotifier {
+                            app: app.handle().clone(),
+                            hud_seq: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                        },
+                        diagnostics: Arc::clone(&diagnostics),
                     }),
                 },
                 1,
             );
             let handle = coordinator.handle();
+
+            // Sleep, screen lock, user switch and logout cancel any session and
+            // clear the draft; nothing resumes on wake (docs/04 invariant 10).
+            let suspend_handle = handle.clone();
+            let suspend_app = app.handle().clone();
+            let watch = dictation_platform::watch_suspend(Arc::new(move || {
+                suspend_handle.send(Command::Suspend);
+                if let Some(s) = suspend_app.try_state::<AppState>()
+                    && let Ok(mut slot) = s.mic_test.lock()
+                    && let Some(mut t) = slot.take()
+                {
+                    t.stop();
+                }
+            }));
+            // Observers live for the whole process (main-thread objects).
+            std::mem::forget(watch);
 
             app.manage(AppState {
                 coordinator: Mutex::new(Some(coordinator)),
@@ -808,6 +856,7 @@ pub fn run() {
                 shortcut_error: Mutex::new(None),
                 mic_test: Mutex::new(None),
                 last_probe: Mutex::new(None),
+                diagnostics,
             });
             refresh_readiness(&app.state::<AppState>());
             apply_delivery_settings(&app.state::<AppState>(), &cfg);
@@ -837,6 +886,7 @@ pub fn run() {
                 tray = tray.icon(icon.clone());
             }
             tray.build(app)?;
+            update_tray_status(app.handle(), None);
             onboarding::first_run_show(app.handle());
             Ok(())
         })
@@ -880,7 +930,9 @@ pub fn run() {
             onboarding::resume_shortcuts,
             onboarding::complete_onboarding,
             onboarding::set_launch_at_login,
-            onboarding::open_review
+            onboarding::open_review,
+            diagnostics::get_diagnostics,
+            diagnostics::save_diagnostics
         ])
         .run(tauri::generate_context!())
         .expect("error while running Local Dictation");

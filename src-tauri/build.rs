@@ -34,6 +34,8 @@ fn main() {
         "complete_onboarding",
         "set_launch_at_login",
         "open_review",
+        "get_diagnostics",
+        "save_diagnostics",
     ]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest))
         .unwrap_or_else(|e| panic!("tauri-build failed: {e:#}"));

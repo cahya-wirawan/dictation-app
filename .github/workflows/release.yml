@@ -1,0 +1,113 @@
+name: Release
+
+# Builds release artifacts for a version tag (docs/10 §1–§3). Signing and
+# notarization run only when the release secrets exist; pull requests never
+# trigger this workflow and never see them (docs/10 §2). Artifacts are
+# attached to a *draft* GitHub release that a maintainer reviews and publishes
+# manually, after the pre-release checklist in docs/RELEASE.md.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  DICTATION_GGML_NATIVE: "OFF"
+
+jobs:
+  macos:
+    name: macOS arm64 DMG
+    runs-on: macos-26
+    timeout-minutes: 90
+    environment: release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+      - run: cmake --version || brew install cmake
+      - run: rustup show active-toolchain || rustup toolchain install
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm version:check
+      - name: Tag matches version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: test "${GITHUB_REF_NAME}" = "v$(node -p 'require("./package.json").version')"
+      - run: pnpm notices:check
+      - name: Stage release worker
+        run: PROFILE=release ./scripts/stage-worker.sh
+
+      - name: Import signing certificate
+        id: cert
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -z "$APPLE_CERTIFICATE" ]; then
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No signing secrets: building an ad-hoc signed, unnotarized DMG (not for distribution)."
+            exit 0
+          fi
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Build DMG (Developer ID signed + notarized)
+        if: steps.cert.outputs.signed == 'true'
+        env:
+          CI: "true"
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: pnpm tauri build --bundles app,dmg
+
+      - name: Build DMG (ad-hoc signed)
+        if: steps.cert.outputs.signed != 'true'
+        env:
+          CI: "true"
+        run: pnpm tauri build --bundles app,dmg
+
+      - name: Verify signature and bundle
+        run: ./scripts/verify-macos-bundle.sh "target/release/bundle/macos/Local Dictation.app" ${{ steps.cert.outputs.signed == 'true' && '--distribution' || '' }} | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: SBOM and checksums
+        run: |
+          mkdir -p dist-release
+          cp target/release/bundle/dmg/*.dmg dist-release/
+          node scripts/notices.mjs --check --sbom dist-release/sbom.cdx.json
+          cp THIRD_PARTY_NOTICES.md dist-release/
+          (cd dist-release && shasum -a 256 * > SHA256SUMS)
+          cat dist-release/SHA256SUMS >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-macos-arm64
+          path: dist-release/
+          retention-days: 30
+
+  draft-release:
+    name: Draft GitHub release
+    needs: macos
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: artifacts
+      - name: Create draft release with notes from CHANGELOG.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          awk -v v="$v" '$0 ~ "^## \\[" v "\\]" {on=1; next} /^## \[/ {on=0} on' CHANGELOG.md > notes.md
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "Local Dictation $v" --notes-file notes.md artifacts/*/*

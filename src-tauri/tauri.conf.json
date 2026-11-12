@@ -72,7 +72,16 @@
     ],
     "macOS": {
       "minimumSystemVersion": "13.0",
-      "infoPlist": "Info.plist"
-    }
+      "infoPlist": "Info.plist",
+      "entitlements": "Entitlements.plist",
+      "hardenedRuntime": true,
+      "signingIdentity": "-"
+    },
+    "resources": {
+      "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md"
+    },
+    "copyright": "Local Dictation contributors",
+    "category": "Productivity",
+    "shortDescription": "Local, private dictation into any app"
   }
 }

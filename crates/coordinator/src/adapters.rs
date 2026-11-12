@@ -25,6 +25,7 @@ use transcription_protocol::{JobId, Language, WorkerErrorCode};
 
 pub use crate::actor::ModelRef;
 use crate::actor::{AdapterEvent, CaptureAdapter, DeliveryAdapter, Msg, TranscriberAdapter};
+use crate::diagnostics::{Diagnostics, JobTiming, WorkerFacts};
 
 /// Opens an audio source for a session on the given device (`None`: the
 /// current system default). Called on the actor thread.
@@ -188,6 +189,7 @@ pub struct WorkerTranscriber {
     client: Arc<Mutex<Option<WorkerClient>>>,
     cancel: Arc<Mutex<Option<CancelHandle>>>,
     epoch: WorkerEpoch,
+    diagnostics: Option<Arc<Diagnostics>>,
 }
 
 /// One second of silence: exercises the full inference path of a freshly
@@ -202,9 +204,17 @@ impl WorkerTranscriber {
             client: Arc::new(Mutex::new(None)),
             cancel: Arc::new(Mutex::new(None)),
             epoch,
+            diagnostics: None,
         };
         t.respawn_in_background(epoch);
         t
+    }
+
+    /// Records per-job durations and worker restarts (never text or audio).
+    #[must_use]
+    pub fn with_diagnostics(mut self, d: Arc<Diagnostics>) -> Self {
+        self.diagnostics = Some(d);
+        self
     }
 
     fn respawn_in_background(&self, epoch: WorkerEpoch) {
@@ -263,6 +273,7 @@ impl TranscriberAdapter for WorkerTranscriber {
             Arc::clone(&self.client),
             Arc::clone(&self.cancel),
         );
+        let diagnostics = self.diagnostics.clone();
         thread::spawn(move || {
             let send = |e| {
                 let _ = events.send(Msg::Adapter(e));
@@ -292,6 +303,14 @@ impl TranscriberAdapter for WorkerTranscriber {
                 }
             }
             let Some(c) = slot.as_mut() else { return };
+            if let Some(d) = &diagnostics {
+                let info = c.info();
+                d.record_worker(WorkerFacts {
+                    engine: info.engine.clone(),
+                    engine_revision: info.engine_revision.clone(),
+                    backends: info.backends.clone(),
+                });
+            }
             let id = JobId {
                 session_id: job.session,
                 generation: job.generation,
@@ -302,7 +321,14 @@ impl TranscriberAdapter for WorkerTranscriber {
                 .lock()
                 .map(|l| l.clone())
                 .unwrap_or_else(|_| Language::auto());
+            let started = std::time::Instant::now();
             let result = c.transcribe(id, language, &pcm, cfg.job_timeout);
+            if let (Some(d), Ok(_)) = (&diagnostics, &result) {
+                d.record_timing(JobTiming {
+                    audio_ms: u32::try_from(pcm.len() / 16).unwrap_or(u32::MAX),
+                    inference_ms: u32::try_from(started.elapsed().as_millis()).unwrap_or(u32::MAX),
+                });
+            }
             drop(pcm); // no cached audio after the job
             match result {
                 Ok(r) => send(AdapterEvent::TranscriptionDone { job, text: r.text }),
@@ -327,6 +353,9 @@ impl TranscriberAdapter for WorkerTranscriber {
             && let Some(h) = h.as_ref()
         {
             h.kill();
+        }
+        if let Some(d) = &self.diagnostics {
+            d.record_worker_restart();
         }
         self.epoch += 1;
         self.respawn_in_background(self.epoch);

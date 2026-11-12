@@ -179,6 +179,10 @@ export const listInputDevices = () => invoke<InputDevice[]>("list_input_devices"
 export const startMicTest = (deviceId: string | null) => invoke<null>("start_mic_test", { deviceId });
 export const stopMicTest = () => invoke<null>("stop_mic_test");
 export const runWorkerSelftest = () => invoke<SelftestReport>("run_worker_selftest");
+/** Redacted support report (JSON text): versions, settings values, status codes, timings. */
+export const getDiagnostics = () => invoke<string>("get_diagnostics");
+/** Opens a native save dialog in Rust; resolves false if the user canceled. */
+export const saveDiagnostics = () => invoke<boolean>("save_diagnostics");
 
 export const onPhase = (cb: (p: Phase) => void): Promise<UnlistenFn> =>
   listen<{ phase: Phase }>("phase_changed", (e) => { cb(e.payload.phase); });

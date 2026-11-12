@@ -53,6 +53,13 @@ pub fn focused_text_value() -> Option<String> {
     None
 }
 
+/// No OS session-state hook on this platform yet; nothing is ever reported.
+pub struct SuspendWatch;
+
+pub fn watch_suspend(_on_suspend: std::sync::Arc<dyn Fn() + Send + Sync>) -> SuspendWatch {
+    SuspendWatch
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for the app and its bundled worker (docs/05 §2,
+  docs/10 §1). Only microphone input is requested. No JIT, no unsigned
+  executable memory, no library-validation exemption, no Apple Events and no
+  sandbox exceptions: the worker is a nested signed executable, not a plugin.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
+</dict>
+</plist>

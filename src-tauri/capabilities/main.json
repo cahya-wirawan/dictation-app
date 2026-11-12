@@ -38,6 +38,8 @@
     "allow-resume-shortcuts",
     "allow-complete-onboarding",
     "allow-set-launch-at-login",
-    "allow-open-review"
+    "allow-open-review",
+    "allow-get-diagnostics",
+    "allow-save-diagnostics"
   ]
 }

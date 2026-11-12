@@ -1,6 +1,6 @@
 # Implementation status
 
-Last updated: 12 November 2026 · **M0 partially complete · M1–M4 implemented, native GUI run pending** · Version 0.5.0
+Last updated: 12 November 2026 · **M0 partially complete · M1–M5 implemented, native GUI run and release credentials pending** · Version 0.5.0
 
 **M0 is not done.** Its exit evidence must come from a macOS Apple Silicon release-like build (docs/07 §2), and no Mac has run this code yet. This round ran on a headless Linux host. Everything that can be proven without a display, microphone or macOS is proven below. Everything else is written but marked **unverified**.
 
@@ -53,6 +53,53 @@ The Tauri crate compiles and links on macOS, and the bundle layout is correct.
 | eslint / typescript-eslint | 10.14.0 / 8.72.2 | `strictTypeChecked` |
 
 Lockfiles: `Cargo.lock`, `pnpm-lock.yaml`.
+
+## M5: hardening and release tooling
+
+The exit criteria are "all release gates and clean-machine install" (docs/07 §2). **These are not met.** Two things are missing: a consented release corpus (docs/08 §3) and a Developer ID certificate. A clean-machine install also needs a person at the Mac. M5 delivers the tooling and every gate that can be measured without them, with the results below.
+
+| Item | Where | Evidence |
+|---|---|---|
+| **Sleep, lock, user switch, logout → `Suspend`** | `crates/platform/src/macos.rs` (`watch_suspend`), wired in `src-tauri/src/lib.rs` | NSWorkspace will-sleep, screens-did-sleep, session-did-resign-active and will-power-off, plus the distributed `com.apple.screenIsLocked` notification. All of them send `Command::Suspend` and stop a running mic test. The reducer already cancels, kills the worker and clears the draft (tested since M1). The native hook is **compiler-checked only**, because sleeping or locking the Mac over SSH isn't possible. |
+| **Diagnostics export** | `crates/coordinator/src/diagnostics.rs`, `src-tauri/src/diagnostics.rs`, `src/features/settings/SupportReport.tsx` | **What it records:** bounded rings of outcome codes (64) and job timings (100), the worker's Hello facts, and the number of restarts. **Report:** versions, OS and architecture, protocol, model ids, permission codes, readiness, and settings reduced to non-identifying values (no device names, no excluded-app ids). **UI:** the preview shows exactly the text Save writes, and Save goes through a native dialog opened by Rust. **Tests:** the soak test asserts a dictated token never appears in the report; frontend tests check that Save needs a preview first and handles a cancel. |
+| **Tray status** | `update_tray_status` | The tooltip follows the phase and readiness: *Ready*, *Listening…*, *Setup needed: install a model*, and so on. |
+| **Coordinator soak** | `crates/coordinator/tests/soak.rs` | 500 sessions through the real actor, DSP and resampler (48 kHz stereo), mixing endpoint finish, stop, cancel while listening, cancel while transcribing (kill), silence and disconnect. **After every session:** exactly one outcome, mic closed. **At the end:** no job ran twice; RSS 8.3 → 8.5 MB, under the 10% growth limit. Passes on Linux and on the M2 Pro. |
+| **Benchmark harness** | `crates/bench` (`dictation-bench`) | `corpus`: raw and normalized WER, CER, latency median/p95/max, RTF, 10 cold starts, worker peak RSS. `nospeech`: synthetic no-speech fixtures, accepted cases sent through the real worker. `soak`: the real worker with hard kills every 10th session, an orphan check and an RSS trend. The normalization policy is fixed in `crates/bench/src/lib.rs`: NFC, lowercase, punctuation → space, no number normalization. |
+| **Signing and installer** | `src-tauri/Entitlements.plist`, `tauri.conf.json`, `scripts/verify-macos-bundle.sh`, `.github/workflows/release.yml` | Hardened runtime with only `com.apple.security.device.audio-input`. The default build is ad-hoc signed; a Developer ID signature and notarization are used when the `release` environment secrets exist. **Verified on the M2 Pro:** a headless `CI=true pnpm tauri build --bundles app,dmg` gives a 6.2 MiB DMG; `hdiutil verify` reports a valid checksum; `codesign --verify --deep --strict` passes; app and nested worker both carry `adhoc,runtime`; the entitlements are exact. The **signed, hardened worker inside the bundle runs inference**: the corpus benchmark below used it. |
+| **SBOM and notices** | `scripts/notices.mjs`, `THIRD_PARTY_NOTICES.md` | It walks the normal (shipped) dependency graph of the app and worker on all three release targets: 420 crates, 4 npm packages, whisper.cpp/ggml and the model weights. License texts are grouped where identical. A CycloneDX 1.5 SBOM comes out at release time. **Policy:** permissive licenses only, enforced in CI (`pnpm notices:check`); 0 violations. The notices file is bundled as an app resource. |
+| **Docs** | `docs/SUPPORT.md`, `docs/RELEASE.md` | User help covers microphone, model, language, silence, permissions, shortcut conflicts, the reasons a draft is kept instead of a paste, troubleshooting, privacy, and uninstall with data locations. The release procedure covers the secrets, the docs/10 §3 checklist and rollback. |
+
+### M5 measurements
+
+These are **smoke measurements**, not release evidence. The corpus is a single public-domain English clip, and the no-speech set is synthetic.
+
+| Metric | Linux i3-10100 (native build) | Apple M2 Pro (signed bundle worker, CPU, portable) |
+|---|---|---|
+| JFK 11 s, 30 warm runs: median / p95 / max | 990 / 1688 / 3899 ms | 376 / 605 / 614 ms |
+| RTF (median) | 0.090 | 0.034 |
+| WER raw / normalized / CER | 4.5% / 0.0% / 0.0% | 4.5% / 0.0% / 0.0% |
+| Cold start (spawn + verified load + first job), 10 runs: median / p95 | 1682 / 2825 ms | 533 / 771 ms |
+| Model load alone (median) | 716 ms | 140 ms |
+| Worker peak RSS (Base, incl. model) | 242 MiB | 244 MiB |
+| No-speech suite (29 synthetic cases): endpointer accepts | 6 / 29 | 6 / 29 |
+| No-speech suite: automated insertions (non-empty text) | **0 / 29** (95% upper bound 9.8%) | **0 / 29** |
+| DSP time per 10 ms block: median / p95 | 9.7 / 14.2 µs | 6.0 / 6.4 µs |
+| Real-worker soak, 500 sessions | SOAK_LINUX | 174 s; 451 jobs, 49 hard kills + respawns, **0 orphans**; 3 s clip median 317 / p95 501 ms; worker RSS flat at about 248 MB (trend −0.0%) |
+
+The raw WER of 4.5% is a single token: the reference has "so," and the hypothesis has "so".
+
+### M5 findings
+
+1. **The VAD accepts loud broadband noise and sustained tones.** All five −25 dBFS white-noise seeds and a sustained three-note chord passed the endpointer as speech: 208–384 ms of speech for the noise, 7.1 s for the chord. In every case whisper returned empty text, so the session ends as *no usable text* and nothing is inserted. The thresholds were **not** retuned on this set. docs/08 §3 requires tuning on a separate tuning set; this synthetic suite is regression material, not that set.
+2. **The bundle identifier is still `app.localdictation.m0`.** Changing it moves the data directory and resets macOS permission grants, so it needs a product decision before the first public release. Recorded in docs/RELEASE.md §5.
+
+**Not done in M5:**
+
+- Developer ID signing, notarization and Gatekeeper acceptance: no certificate.
+- The release corpus and the docs/08 §4 quality gates: no consented recordings.
+- Clean-machine install and permission evidence, and the 24-hour tray residency test: these need a person at the Mac.
+- Trigger latency, idle CPU and parent + worker RSS of the running app (docs/08 §5): these need the GUI app.
+- Reviewed German and Indonesian UI translations, and an adjustable HUD position.
 
 ## M4: product UI
 

@@ -35,6 +35,7 @@ import { useEvent } from "../../useEvent";
 import { DictationPanel } from "../dictation/DictationPanel";
 import { ModelsPanel } from "../models/ModelsPanel";
 import { Onboarding } from "../onboarding/Onboarding";
+import { SupportReport } from "./SupportReport";
 
 const PAGES = ["general", "recording", "shortcuts", "models", "delivery", "privacy", "about"] as const;
 type Page = (typeof PAGES)[number];
@@ -370,6 +371,7 @@ function About({ snapshot }: { snapshot: Snapshot }) {
         )}
         {probe && <p className="hint">Last focus check: {probe.afterHudCheck}</p>}
       </details>
+      <SupportReport />
     </div>
   );
 }

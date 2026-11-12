@@ -100,6 +100,10 @@ jobs:
         if: runner.os == 'Linux'
         run: cargo fmt --all --check
 
+      - name: Third-party notices up to date + license policy (docs/10 §2)
+        if: runner.os == 'Linux'
+        run: pnpm notices:check
+
       - name: clippy (workspace incl. src-tauri, all features)
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
@@ -111,7 +115,7 @@ jobs:
         run: grep -E 'M0 T0\.[78]|pipeline\(' test-output.txt >> "$GITHUB_STEP_SUMMARY" || true
 
   macos-bundle:
-    name: macOS app bundle (unsigned)
+    name: macOS app bundle (ad-hoc signed)
     needs: rust
     runs-on: macos-26
     timeout-minutes: 60
@@ -132,21 +136,16 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Stage release worker (portable CPU build)
         run: PROFILE=release ./scripts/stage-worker.sh
-      - name: Build .app
-        run: pnpm tauri build --bundles app
-      - name: Verify bundle layout
-        run: |
-          app="target/release/bundle/macos/Local Dictation.app"
-          test -x "$app/Contents/MacOS/dictation-app"
-          test -x "$app/Contents/MacOS/dictation-worker"
-          file "$app/Contents/MacOS/dictation-worker" | tee -a "$GITHUB_STEP_SUMMARY"
-          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist" | tee -a "$GITHUB_STEP_SUMMARY"
-          /usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' "$app/Contents/Info.plist"
-          codesign -dv "$app" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || true
+      - name: Build .app + DMG (ad-hoc signed, hardened runtime)
+        env:
+          CI: "true"
+        run: pnpm tauri build --bundles app,dmg
+      - name: Verify bundle, signature, hardened runtime and entitlements
+        run: ./scripts/verify-macos-bundle.sh "target/release/bundle/macos/Local Dictation.app" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Zip bundle
-        run: ditto -c -k --keepParent "target/release/bundle/macos/Local Dictation.app" LocalDictation-macos-arm64-unsigned.zip
+        run: ditto -c -k --keepParent "target/release/bundle/macos/Local Dictation.app" LocalDictation-macos-arm64-adhoc.zip
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: LocalDictation-macos-arm64-unsigned
-          path: LocalDictation-macos-arm64-unsigned.zip
+          name: LocalDictation-macos-arm64-adhoc
+          path: LocalDictation-macos-arm64-adhoc.zip
           retention-days: 7

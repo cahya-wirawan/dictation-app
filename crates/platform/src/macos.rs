@@ -294,3 +294,73 @@ pub fn focused_text_value() -> Option<String> {
     let el = copy_attr(&system, "AXFocusedUIElement")?;
     string_attr(as_element(&el)?, "AXValue")
 }
+
+/// Observers that turn sleep, display sleep, screen lock, fast user switching
+/// and logout/power-off into one callback (docs/04 invariant 10: cancel, clear
+/// the draft, never resume a paste on wake). Dropping it removes them.
+pub struct SuspendWatch {
+    workspace: Vec<Retained<objc2::runtime::ProtocolObject<dyn objc2::runtime::NSObjectProtocol>>>,
+    distributed:
+        Vec<Retained<objc2::runtime::ProtocolObject<dyn objc2::runtime::NSObjectProtocol>>>,
+}
+
+/// Must be called on the main thread (NSWorkspace notifications are posted
+/// there); `on_suspend` must only send a message, never block.
+pub fn watch_suspend(on_suspend: std::sync::Arc<dyn Fn() + Send + Sync>) -> SuspendWatch {
+    use objc2_app_kit::{
+        NSWorkspaceScreensDidSleepNotification, NSWorkspaceSessionDidResignActiveNotification,
+        NSWorkspaceWillPowerOffNotification, NSWorkspaceWillSleepNotification,
+    };
+    use objc2_foundation::{NSDistributedNotificationCenter, NSNotification};
+
+    let block = {
+        let cb = std::sync::Arc::clone(&on_suspend);
+        block2::RcBlock::new(move |_n: NonNull<NSNotification>| cb())
+    };
+    let center = NSWorkspace::sharedWorkspace().notificationCenter();
+    // SAFETY: static AppKit notification names.
+    let names = unsafe {
+        [
+            NSWorkspaceWillSleepNotification,
+            NSWorkspaceScreensDidSleepNotification,
+            NSWorkspaceSessionDidResignActiveNotification,
+            NSWorkspaceWillPowerOffNotification,
+        ]
+    };
+    let workspace = names
+        .into_iter()
+        .map(|name| {
+            // SAFETY: nil object/queue (deliver on the posting thread); the block
+            // only calls a Send + Sync closure.
+            unsafe {
+                center.addObserverForName_object_queue_usingBlock(Some(name), None, None, &block)
+            }
+        })
+        .collect();
+    // Screen lock is only announced as a distributed notification.
+    let dist = NSDistributedNotificationCenter::defaultCenter();
+    let locked = NSString::from_str("com.apple.screenIsLocked");
+    // SAFETY: as above.
+    let distributed = vec![unsafe {
+        dist.addObserverForName_object_queue_usingBlock(Some(&locked), None, None, &block)
+    }];
+    SuspendWatch {
+        workspace,
+        distributed,
+    }
+}
+
+impl Drop for SuspendWatch {
+    fn drop(&mut self) {
+        let center = NSWorkspace::sharedWorkspace().notificationCenter();
+        for o in &self.workspace {
+            // SAFETY: tokens returned by addObserverForName on this center.
+            unsafe { center.removeObserver(o.as_ref()) };
+        }
+        let dist = objc2_foundation::NSDistributedNotificationCenter::defaultCenter();
+        for o in &self.distributed {
+            // SAFETY: as above.
+            unsafe { dist.removeObserver(o.as_ref()) };
+        }
+    }
+}
