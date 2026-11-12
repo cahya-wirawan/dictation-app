@@ -834,7 +834,7 @@ pub fn run() {
                 }
             }));
             // Observers live for the whole process (main-thread objects).
-            std::mem::forget(watch);
+            let _watch: &'static mut _ = Box::leak(Box::new(watch));
 
             app.manage(AppState {
                 coordinator: Mutex::new(Some(coordinator)),
