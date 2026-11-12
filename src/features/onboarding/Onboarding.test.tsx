@@ -43,7 +43,7 @@ const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({
   schemaVersion: 1, appVersion: "0.3.0", platform: "macos", phase: "idle", draft: null, readyError: null,
   accessibility: "Denied", workerFound: true, activeModel: null, settingsRevision: 1, settingsNote: null,
   onboardingComplete: false, shortcuts: { toggle: "Ctrl+Alt+Space", cancel: "Ctrl+Alt+Escape", error: null },
-  micTestActive: false, lastProbe: null, ...over,
+  micTestActive: false, lastProbe: null, session: null, ...over,
 });
 
 const config = {

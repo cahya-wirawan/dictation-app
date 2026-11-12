@@ -69,6 +69,7 @@ pub(crate) struct AppState {
     mic_test: Mutex<Option<MicTest>>,
     last_probe: Mutex<Option<ProbeReport>>,
     pub(crate) diagnostics: Arc<Diagnostics>,
+    session: Option<SessionView>,
 }
 
 #[derive(Clone, Serialize)]
@@ -107,6 +108,40 @@ struct Snapshot {
     shortcuts: ShortcutStatus,
     mic_test_active: bool,
     last_probe: Option<ProbeReport>,
+    /// Linux only: what this desktop session supports (probed once at start).
+    session: Option<SessionView>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SessionView {
+    kind: &'static str,
+    desktop: Option<String>,
+    global_shortcuts_reliable: bool,
+    copy_available: bool,
+    auto_paste: bool,
+}
+
+#[cfg(target_os = "linux")]
+fn probe_session() -> Option<SessionView> {
+    use dictation_platform::SessionKind;
+    let p = dictation_platform::probe();
+    Some(SessionView {
+        kind: match p.kind {
+            SessionKind::X11 => "x11",
+            SessionKind::Wayland => "wayland",
+            SessionKind::None => "none",
+        },
+        desktop: p.desktop,
+        global_shortcuts_reliable: p.global_shortcuts_reliable,
+        copy_available: p.x11_reachable,
+        auto_paste: false,
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn probe_session() -> Option<SessionView> {
+    None
 }
 
 #[derive(Serialize)]
@@ -374,6 +409,7 @@ fn get_snapshot(app: AppHandle, state: State<'_, AppState>) -> Snapshot {
         },
         mic_test_active,
         last_probe: state.last_probe.lock().ok().and_then(|p| p.clone()),
+        session: state.session.clone(),
     }
 }
 
@@ -857,6 +893,7 @@ pub fn run() {
                 mic_test: Mutex::new(None),
                 last_probe: Mutex::new(None),
                 diagnostics,
+                session: probe_session(),
             });
             refresh_readiness(&app.state::<AppState>());
             apply_delivery_settings(&app.state::<AppState>(), &cfg);

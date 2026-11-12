@@ -973,6 +973,8 @@ dependencies = [
  "objc2-foundation",
  "thiserror 2.0.21",
  "windows",
+ "x11rb",
+ "zbus",
 ]
 
 [[package]]

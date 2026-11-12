@@ -1,5 +1,6 @@
 import { cancelDictation, startDictation, stopDictation, type Outcome, type Phase, type Snapshot } from "../../ipc";
 import { errorText, outcomeText, phaseLabel } from "../../messages";
+import { SessionNotice } from "../../components/SessionNotice";
 
 interface Props {
   snapshot: Snapshot | null;
@@ -25,6 +26,7 @@ export function DictationPanel({ snapshot, phase, lastOutcome, onError }: Props)
         {lastOutcome && !busy && <span> · {outcomeText(lastOutcome)}</span>}
       </p>
       {snapshot?.readyError && <p className="error">{errorText(snapshot.readyError)}</p>}
+      <SessionNotice session={snapshot?.session ?? null} />
       {snapshot && (
         <p className="hint">
           Press <kbd>{snapshot.shortcuts.toggle}</kbd> in any app to start; press again or pause to finish.

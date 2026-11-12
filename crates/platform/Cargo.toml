@@ -26,6 +26,11 @@ objc2-application-services = { version = "=0.3.2", default-features = false, fea
 objc2-core-graphics = { version = "=0.3.2", default-features = false, features = ["std", "CGEvent", "CGEventTypes", "CGRemoteOperation", "CGEventSource"] }
 libc = "0.2"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# Both are already shipped through the Tauri shortcut and single-instance plugins.
+x11rb = "=0.13.2"
+zbus = "=5.19.0"
+
 [target.'cfg(windows)'.dependencies]
 windows = { version = "=0.62.2", features = [
     "Win32_Foundation",
