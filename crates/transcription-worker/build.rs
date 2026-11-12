@@ -17,15 +17,31 @@ fn main() {
     println!("cargo::rerun-if-changed=build.rs");
     println!("cargo::rerun-if-changed=../../vendor/whisper.cpp/include/whisper.h");
     println!("cargo::rerun-if-env-changed=DICTATION_GGML_NATIVE");
+    println!("cargo::rerun-if-env-changed=MACOSX_DEPLOYMENT_TARGET");
 
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     // Metal exists only on Apple targets; the feature is a no-op elsewhere.
     let metal = env::var_os("CARGO_FEATURE_METAL").is_some() && target_os == "macos";
     // GGML_NATIVE=ON tunes for the build machine; release/distributed builds
     // must set DICTATION_GGML_NATIVE=OFF so the binary runs on every target CPU.
     let native = env::var("DICTATION_GGML_NATIVE").unwrap_or_else(|_| "ON".into());
 
-    let dst = cmake::Config::new(&src)
+    let mut cfg = cmake::Config::new(&src);
+    if target_os == "macos" {
+        // Must match the deployment target rustc links with (.cargo/config.toml),
+        // otherwise ld warns that objects target a newer macOS than the binary.
+        let min = env::var("MACOSX_DEPLOYMENT_TARGET").unwrap_or_else(|_| "13.0".into());
+        cfg.define("CMAKE_OSX_DEPLOYMENT_TARGET", &min);
+    }
+    if native == "OFF" && target_arch == "x86_64" {
+        // Portable x86 baseline = x86-64-v3 (Haswell, 2013+). Without this ggml
+        // falls back to SSE-only code, ~11x slower on the JFK fixture.
+        for opt in ["GGML_AVX", "GGML_AVX2", "GGML_FMA", "GGML_F16C", "GGML_BMI2"] {
+            cfg.define(opt, "ON");
+        }
+    }
+    let dst = cfg
         .profile("Release")
         .define("BUILD_SHARED_LIBS", "OFF")
         .define("WHISPER_BUILD_TESTS", "OFF")
@@ -71,6 +87,8 @@ fn main() {
         "macos" => {
             println!("cargo::rustc-link-lib=c++");
             println!("cargo::rustc-link-lib=framework=Foundation");
+            // ggml-cpu uses vDSP from Accelerate (GGML_ACCELERATE, default ON).
+            println!("cargo::rustc-link-lib=framework=Accelerate");
             if metal {
                 println!("cargo::rustc-link-lib=framework=Metal");
                 println!("cargo::rustc-link-lib=framework=MetalKit");

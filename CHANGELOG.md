@@ -17,6 +17,21 @@ All notable changes to Local Dictation are documented here. The format follows [
 
 ## [Unreleased]
 
+### Added
+
+- **CI** (`.github/workflows/ci.yml`), with every action pinned to a commit SHA:
+  - frontend typecheck, lint, build and version check;
+  - Rust fmt, clippy `-D warnings` and tests (including real inference) on Ubuntu 24.04 and macOS 26 arm64;
+  - an unsigned macOS `.app` artifact, with checks of the bundle layout.
+- `scripts/fetch-model.sh`: downloads the approved model and verifies its size and SHA-256.
+
+### Fixed
+
+- macOS: the worker failed to link because ggml uses Accelerate (vDSP); it now links `-framework Accelerate`.
+- macOS: one deployment target (13.0) for rustc, cmake and cc, via `.cargo/config.toml`. Previously whisper.cpp objects were built for the SDK's macOS version.
+- x86_64 portable builds (`DICTATION_GGML_NATIVE=OFF`) now target x86-64-v3 instead of SSE-only. This is about 10x faster.
+- `--features metal` is a no-op on non-Apple targets.
+
 ## [0.1.0] - 2026-11-12
 
 Milestone M0 feasibility spike, partially complete. See `docs/IMPLEMENTATION_STATUS.md` for what was verified, where, and what still needs a Mac.

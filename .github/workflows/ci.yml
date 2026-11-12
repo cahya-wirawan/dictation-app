@@ -1,0 +1,150 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Portable ggml CPU code: cached build artifacts may run on a different
+  # runner CPU than the one that compiled them.
+  DICTATION_GGML_NATIVE: "OFF"
+
+# Actions are pinned to immutable commits (docs/10 §2); the comment is the tag.
+jobs:
+  frontend:
+    name: Frontend + version consistency
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm build
+      - name: Version consistency (Cargo, crates, Cargo.lock, package.json, Tauri, CHANGELOG)
+        run: pnpm version:check
+      - name: Tag matches version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          v=$(node -p 'require("./package.json").version')
+          test "${GITHUB_REF_NAME}" = "v${v}" || { echo "tag ${GITHUB_REF_NAME} != v${v}"; exit 1; }
+
+  rust:
+    name: Rust (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+
+      - name: Linux system libraries (Tauri, ALSA)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libayatana-appindicator3-dev \
+            librsvg2-dev libxdo-dev libssl-dev libasound2-dev cmake
+
+      - name: cmake (macOS)
+        if: runner.os == 'macOS'
+        run: cmake --version || brew install cmake
+
+      - name: Rust toolchain (from rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Frontend dist (embedded by tauri::generate_context!)
+        run: pnpm install --frozen-lockfile && pnpm build
+
+      - name: Model cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .models/ggml-base.bin
+          key: whisper-ggml-base-60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe
+      - name: Fetch and verify model
+        run: ./scripts/fetch-model.sh
+
+      - name: Stage worker sidecar (Tauri externalBin)
+        run: PROFILE=debug ./scripts/stage-worker.sh
+
+      - name: rustfmt
+        if: runner.os == 'Linux'
+        run: cargo fmt --all --check
+
+      - name: clippy (workspace incl. src-tauri, all features)
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Tests (incl. real whisper.cpp inference on the JFK fixture)
+        run: cargo test --workspace -- --nocapture 2>&1 | tee test-output.txt
+
+      - name: Inference timing summary
+        if: always()
+        run: grep -E 'M0 T0\.[78]|pipeline\(' test-output.txt >> "$GITHUB_STEP_SUMMARY" || true
+
+  macos-bundle:
+    name: macOS app bundle (unsigned)
+    needs: rust
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+      - run: cmake --version || brew install cmake
+      - run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: bundle
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Stage release worker (portable CPU build)
+        run: PROFILE=release ./scripts/stage-worker.sh
+      - name: Build .app
+        run: pnpm tauri build --bundles app
+      - name: Verify bundle layout
+        run: |
+          app="target/release/bundle/macos/Local Dictation.app"
+          test -x "$app/Contents/MacOS/dictation-app"
+          test -x "$app/Contents/MacOS/dictation-worker"
+          file "$app/Contents/MacOS/dictation-worker" | tee -a "$GITHUB_STEP_SUMMARY"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist" | tee -a "$GITHUB_STEP_SUMMARY"
+          /usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' "$app/Contents/Info.plist"
+          codesign -dv "$app" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || true
+      - name: Zip bundle
+        run: ditto -c -k --keepParent "target/release/bundle/macos/Local Dictation.app" LocalDictation-macos-arm64-unsigned.zip
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: LocalDictation-macos-arm64-unsigned
+          path: LocalDictation-macos-arm64-unsigned.zip
+          retention-days: 7
