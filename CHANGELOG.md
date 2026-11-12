@@ -24,6 +24,20 @@ All notable changes to Local Dictation are documented here. The format follows [
   - Rust fmt, clippy `-D warnings` and tests (including real inference) on Ubuntu 24.04 and macOS 26 arm64;
   - an unsigned macOS `.app` artifact, with checks of the bundle layout.
 - `scripts/fetch-model.sh`: downloads the approved model and verifies its size and SHA-256.
+- **M1 session state machine** (`dictation-domain::session`): a pure reducer over the docs/04 phases.
+  - Session id, generation and worker epoch fencing.
+  - The first finish request wins, so a stop/endpoint race yields one job.
+  - Cancel is serialized with the delivery commit, and the ledger crosses commit at most once.
+  - A memory-only draft with revisions, a 10-minute TTL, copy, discard and explicit paste; review revokes automatic delivery, and suspend clears everything.
+- **Configuration** (`dictation-domain::config`, `dictation-coordinator::config_store`):
+  - Validated schema and merge-patch with revision conflicts.
+  - Atomic, user-private settings file; corrupt files are backed up; future-schema files are left untouched.
+- **DSP worker** (`dictation-audio::dsp`): drains the capture ring into the pipeline and closes the microphone before reporting any result.
+- **Coordinator actor** with capture, worker and delivery adapters. Delivery is copy-only for now.
+- **The app does dictation:**
+  - The toggle shortcut records, finishes on silence or a second press, and transcribes locally.
+  - The text appears as a draft in the settings window, ready to copy.
+  - The tray has Cancel, the HUD shows phase and level, and settings (microphone, language, silence, no-speech timeout, HUD) apply to the next session.
 
 ### Fixed
 

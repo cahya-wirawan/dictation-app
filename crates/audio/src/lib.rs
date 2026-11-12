@@ -5,6 +5,7 @@
 pub mod capture;
 pub mod convert;
 pub mod detector;
+pub mod dsp;
 pub mod endpoint;
 pub mod pipeline;
 pub mod resample;

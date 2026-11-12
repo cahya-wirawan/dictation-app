@@ -28,3 +28,16 @@ button:focus-visible, select:focus-visible { outline: 2px solid var(--accent); o
 body.hud { background: transparent; }
 .hud-pill { margin: 8px; padding: 10px 16px; border-radius: 20px; background: rgba(20, 22, 26, 0.88); color: #fff; font-size: 14px; text-align: center; }
 .hud-pill.listening { box-shadow: inset 0 0 0 2px #e5484d; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+.status { font-size: 1.05em; }
+.draft textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 8px; }
+.form { display: grid; gap: 12px; }
+.form label { display: grid; gap: 4px; }
+.form label.check { display: flex; gap: 8px; align-items: center; }
+details { margin-block: 20px; }
+summary { cursor: pointer; color: var(--muted); }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.hud-pill { display: flex; align-items: center; justify-content: center; gap: 10px; }
+.hud-meter { width: 60px; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.25); overflow: hidden; }
+.hud-meter > span { display: block; height: 100%; background: #e5484d; }
+@media (prefers-reduced-motion: reduce) { .meter > div { transition: none; } }

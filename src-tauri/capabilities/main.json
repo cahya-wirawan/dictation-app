@@ -1,12 +1,23 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-window",
-  "description": "Settings window: read status, mic test, worker self-test. No input injection, process, file or URL APIs exist.",
-  "windows": ["main"],
+  "description": "Settings/review window: status, dictation control, draft review/copy, settings, mic test, worker self-test. No input injection, process, file or URL APIs exist.",
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "allow-get-snapshot",
+    "allow-start-dictation",
+    "allow-stop-dictation",
+    "allow-cancel-dictation",
+    "allow-get-draft",
+    "allow-edit-draft",
+    "allow-copy-draft",
+    "allow-discard-draft",
+    "allow-get-settings",
+    "allow-update-settings",
     "allow-list-input-devices",
     "allow-start-mic-test",
     "allow-stop-mic-test",

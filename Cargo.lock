@@ -862,6 +862,7 @@ name = "dictation-app"
 version = "0.1.0"
 dependencies = [
  "dictation-audio",
+ "dictation-coordinator",
  "dictation-domain",
  "dictation-platform",
  "hound",
@@ -885,6 +886,19 @@ dependencies = [
  "rtrb",
  "rubato",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "dictation-coordinator"
+version = "0.1.0"
+dependencies = [
+ "dictation-audio",
+ "dictation-domain",
+ "dictation-platform",
+ "hound",
+ "serde_json",
+ "thiserror 2.0.21",
+ "transcription-protocol",
 ]
 
 [[package]]

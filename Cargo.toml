@@ -6,6 +6,7 @@ members = [
     "crates/transcription-worker",
     "crates/audio",
     "crates/platform",
+    "crates/coordinator",
     "src-tauri",
 ]
 # src-tauri needs webkit2gtk/gtk on Linux; keep plain `cargo build/test` usable
@@ -16,6 +17,7 @@ default-members = [
     "crates/transcription-worker",
     "crates/audio",
     "crates/platform",
+    "crates/coordinator",
 ]
 
 [workspace.package]
@@ -32,6 +34,7 @@ dictation-domain = { path = "crates/domain" }
 transcription-protocol = { path = "crates/transcription-protocol" }
 dictation-audio = { path = "crates/audio" }
 dictation-platform = { path = "crates/platform" }
+dictation-coordinator = { path = "crates/coordinator" }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.154"
 thiserror = "=2.0.21"
