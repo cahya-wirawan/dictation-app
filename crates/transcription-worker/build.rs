@@ -5,6 +5,10 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// The vendored submodule pin (docs/IMPLEMENTATION_STATUS.md).
+const PINNED_COMMIT: &str = "d1be6fde11ac6e0407606b4e42fe72d34add8037";
+const PINNED_TAG: &str = "v1.9.5";
+
 #[allow(clippy::panic, clippy::expect_used)]
 fn main() {
     let manifest =
@@ -112,14 +116,15 @@ fn main() {
         .warnings(true)
         .compile("dictation_whisper_shim");
 
-    println!(
-        "cargo::rustc-env=WHISPER_CPP_REVISION={}",
-        git(&src, &["rev-parse", "HEAD"])
-    );
-    println!(
-        "cargo::rustc-env=WHISPER_CPP_TAG={}",
-        git(&src, &["describe", "--tags", "--always"])
-    );
+    let revision = git(&src, &["rev-parse", "HEAD"]);
+    let mut tag = git(&src, &["describe", "--tags", "--always"]);
+    // Shallow CI checkouts carry no tags. Name the tag only for the exact
+    // pinned commit; any other commit keeps its bare hash.
+    if !tag.starts_with('v') && revision == PINNED_COMMIT {
+        tag = PINNED_TAG.to_owned();
+    }
+    println!("cargo::rustc-env=WHISPER_CPP_REVISION={revision}");
+    println!("cargo::rustc-env=WHISPER_CPP_TAG={tag}");
     println!("cargo::rustc-env=DICTATION_GGML_NATIVE={native}");
 }
 
