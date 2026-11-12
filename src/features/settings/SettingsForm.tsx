@@ -71,6 +71,26 @@ export function SettingsForm({ devices, onError }: Props) {
           />
         </label>
         <label className="check">
+          <input
+            type="checkbox"
+            checked={cfg.delivery.mode === "auto_paste"}
+            onChange={(e) => { patch({ delivery: { mode: e.target.checked ? "auto_paste" : "copy_only" } }); }}
+          />
+          Automatically paste into the app I was using (otherwise: review and copy)
+        </label>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={cfg.shortcuts.paste_draft !== null}
+            onChange={(e) => { patch({ shortcuts: { paste_draft: e.target.checked ? "Ctrl+Alt+V" : null } }); }}
+          />
+          Paste unsent text into the focused field with <kbd>Ctrl+Option+V</kbd>
+        </label>
+        <p className="hint">
+          Automatic paste puts the text on the clipboard and sends one paste command. It is skipped if you switched
+          apps or fields, in password fields, and in terminals.
+        </p>
+        <label className="check">
           <input type="checkbox" checked={cfg.ui.show_hud} onChange={(e) => { patch({ ui: { show_hud: e.target.checked } }); }} />
           Show the status indicator while dictating
         </label>

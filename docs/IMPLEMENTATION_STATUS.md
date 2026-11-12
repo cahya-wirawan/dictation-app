@@ -1,6 +1,6 @@
 # Implementation status
 
-Last updated: 12 November 2026 · **M0 partially complete · M1 and M2 implemented, native GUI run pending** · Version 0.3.0
+Last updated: 12 November 2026 · **M0 partially complete · M1–M3 implemented, native GUI run pending** · Version 0.3.0
 
 **M0 is not done.** Its exit evidence must come from a macOS Apple Silicon release-like build (docs/07 §2), and no Mac has run this code yet. This round ran on a headless Linux host. Everything that can be proven without a display, microphone or macOS is proven below. Everything else is written but marked **unverified**.
 
@@ -54,6 +54,36 @@ The Tauri crate compiles and links on macOS, and the bundle layout is correct.
 
 Lockfiles: `Cargo.lock`, `pnpm-lock.yaml`.
 
+## M3: delivery vertical slice
+
+The exit criteria are "one complete shortcut-to-text flow and focus-change/cancel tests" (docs/07 §2). They are met with a scripted platform through the real actor, reducer and delivery adapter. They are **not yet proven against TextEdit or a browser on the Mac**: that's the M0 T0.5/T0.6 checklist, which needs a person and the Accessibility grant.
+
+| Work package | Where | Evidence |
+|---|---|---|
+| **C1:** target and permission adapters | `crates/coordinator/src/delivery.rs` (`TargetPlatform`, `NativePlatform`), `crates/platform` | At the start press, a target qualifies only if the field is Editable, it isn't the app itself, it isn't excluded and it re-checks as Same. Otherwise the session is copy-only. Unknown, secure, not-editable and uncapturable targets (Accessibility not granted) never auto-paste. |
+| **C2:** delivery transaction | `PlatformDelivery` | Runs on its own thread because macOS AX references aren't `Send`. Steps: re-check, then wait ≤1500 ms for physical modifier release (never synthesized), then plain-text clipboard write, then re-check again, then `DeliveryPrepared`. The reducer commits the ledger, then exactly one paste chord is posted. `release` sets a cancel flag that the transaction checks before writing the clipboard. |
+| **C3:** full vertical slice | `crates/coordinator/tests/delivery.rs` | 15 tests, covered below. |
+| App | `src-tauri/src/lib.rs`, settings form | `PlatformDelivery<NativePlatform>` replaces `CopyOnlyDelivery`. Delivery mode and excluded apps apply live. The opt-in paste-draft chord (`Ctrl+Option+V`) is re-registered when it changes, and the previous chord is released. |
+
+**What the C3 tests cover:**
+
+- **Happy path:** one paste into the original target with the text staged, then a second session.
+- **Focus changes:** app switch and field switch during transcription each end in a draft, with the clipboard untouched.
+- **Unusable targets:** secure, unknown, not-editable and uncapturable targets are copy-only and never write the clipboard on their own. Terminals and user exclusions are copy-only.
+- **Modifiers:** keys held past the timeout end in a draft with no clipboard write; keys released within the timeout still paste.
+- **Clipboard:** a busy clipboard means no input. If focus is lost after the clipboard write, there's no input, and the clipboard state is reported.
+- **Cancel and send:** a cancel during the modifier wait never touches the clipboard. An uncertain send is attempted exactly once and gives an attempted draft.
+- **Explicit paste:** it goes to the newly focused field and consumes the draft. Into a secure field it is refused and the draft is kept.
+- **Settings and stress:** the copy-only setting works with Copy. Across 12 sessions with cancels there is never a double dispatch.
+
+**Added error code:** `MODIFIERS_HELD`. The spec says to keep a draft when the modifiers are still held after 1.5 s (docs/05 §4 step 5), but its AppError list has no code for that.
+
+**Not done in M3:**
+
+- Accessibility is only *reported*. The explicit "Enable automatic paste" flow that prompts via `AXIsProcessTrustedWithOptions` and links to System Settings is M4 onboarding.
+- Clipboard preservation is P1 (docs/05 §6).
+- No Windows or Linux delivery backend yet.
+
 ## M2: local engine and models
 
 The exit criteria are "offline known fixture transcribed; malformed protocol rejected; no orphan worker" (docs/07 §2). They have been met since M0 by the worker tests, on Linux and on the M2 Pro. M2 adds the model manager (B4) and verified activation.
@@ -96,7 +126,7 @@ The exit criterion is "deterministic state/audio fixtures and no idle capture" (
 
 **Deliberate M1 limits:**
 
-- **Delivery is copy-only.** `CopyOnlyDelivery` never pastes. Automatic delivery and the explicit paste-draft shortcut arrive in M3 (C1–C3); the reducer and actor already implement the commit ledger for them.
+- **Delivery was copy-only in M1.** M3 replaced it with `PlatformDelivery`.
 - **No sleep/lock/logout hook yet.** `Input::Suspend` exists and is tested; the OS notification adapter still has to call it.
 - **IPC request ids are not deduplicated yet** (docs/04 §3), and TypeScript bindings are still hand-written in `src/ipc.ts`.
 - **The coordinator lives in `crates/coordinator`**, not `src-tauri/src/coordinator/` as docs/03 §2 suggests, so it can be tested without a webview (docs/07 §5).

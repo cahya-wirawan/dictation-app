@@ -35,6 +35,8 @@ pub enum AppError {
     WorkerCrash,
     InferenceTimeout,
     TargetChanged,
+    /// Shortcut modifiers were still held after the release timeout.
+    ModifiersHeld,
     PasteUnsupported,
     ClipboardBusy,
     InputUncertain,
