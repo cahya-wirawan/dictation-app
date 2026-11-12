@@ -250,14 +250,17 @@ fn finish(
 
 #[cfg(unix)]
 fn open_private_rw(path: &Path) -> std::io::Result<File> {
-    use std::os::unix::fs::OpenOptionsExt;
-    OpenOptions::new()
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    let f = OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .truncate(false)
         .mode(0o600)
-        .open(path)
+        .open(path)?;
+    // `mode` applies only on creation; tighten a pre-existing partial too.
+    f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    Ok(f)
 }
 
 #[cfg(not(unix))]

@@ -9,14 +9,16 @@
 //! memory-only draft that the user can copy.
 
 mod mictest;
+mod models;
 mod selftest;
 
-use std::path::PathBuf;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use dictation_audio::detector::DetectorConfig;
 use dictation_audio::endpoint::EndpointConfig;
+use dictation_coordinator::actor::ModelRef;
 use dictation_coordinator::actor::{Adapters, Command, Coordinator, CoordinatorHandle, Notifier};
 use dictation_coordinator::adapters::{
     CaptureSettings, CopyOnlyDelivery, DspCapture, SharedCaptureSettings, WorkerConfig,
@@ -27,6 +29,7 @@ use dictation_domain::chord::ChordFilter;
 use dictation_domain::config::Config;
 use dictation_domain::session::{AppError, DraftReason, Outcome};
 use dictation_domain::{Phase, SessionId};
+use dictation_models::{Cancel, ModelStore};
 use serde::Serialize;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -38,10 +41,14 @@ use mictest::MicTest;
 
 const IPC_TIMEOUT: Duration = Duration::from_secs(2);
 
-struct AppState {
+pub(crate) struct AppState {
     coordinator: Mutex<Option<Coordinator>>,
-    handle: CoordinatorHandle,
-    store: Mutex<Option<ConfigStore>>,
+    pub(crate) handle: CoordinatorHandle,
+    pub(crate) store: Mutex<Option<ConfigStore>>,
+    pub(crate) models: ModelStore,
+    /// Shared with the worker adapter: the active model (None = unloaded).
+    pub(crate) model_ref: Arc<Mutex<Option<ModelRef>>>,
+    pub(crate) model_ops: Mutex<HashMap<&'static str, Cancel>>,
     config_note: Option<String>,
     capture_settings: SharedCaptureSettings,
     language: Arc<Mutex<Language>>,
@@ -52,7 +59,6 @@ struct AppState {
     shortcut_error: Mutex<Option<String>>,
     mic_test: Mutex<Option<MicTest>>,
     last_probe: Mutex<Option<ProbeReport>>,
-    model_path: PathBuf,
 }
 
 #[derive(Clone, Serialize)]
@@ -83,9 +89,7 @@ struct Snapshot {
     ready_error: Option<AppError>,
     accessibility: String,
     worker_found: bool,
-    model_installed: bool,
-    model_path: String,
-    model_source_url: &'static str,
+    active_model: Option<&'static str>,
     settings_revision: u64,
     settings_note: Option<String>,
     shortcuts: ShortcutStatus,
@@ -181,15 +185,21 @@ impl Notifier for TauriNotifier {
     }
 }
 
-fn readiness(model_path: &std::path::Path) -> Result<(), AppError> {
+/// Readiness for new sessions: worker binary present and an active model
+/// that is still installed with the approved size.
+fn readiness(state: &AppState) -> Result<(), AppError> {
     if selftest::worker_path().is_none() {
         return Err(AppError::NotReady);
     }
-    match std::fs::metadata(model_path) {
-        Ok(m) if m.len() == selftest::BASE_MULTILINGUAL.bytes => Ok(()),
-        Ok(_) => Err(AppError::ModelInvalid),
-        Err(_) => Err(AppError::ModelUnavailable),
+    match models::active_model(state) {
+        Some(m) if state.models.installed_path(m).is_some() => Ok(()),
+        Some(_) => Err(AppError::ModelInvalid),
+        None => Err(AppError::ModelUnavailable),
     }
+}
+
+pub(crate) fn refresh_readiness(state: &AppState) {
+    state.handle.send(Command::SetReady(readiness(state)));
 }
 
 fn endpoint_from(cfg: &Config) -> EndpointConfig {
@@ -211,7 +221,7 @@ fn parse_id(s: &str) -> Result<SessionId, String> {
 
 #[tauri::command]
 fn get_snapshot(app: AppHandle, state: State<'_, AppState>) -> Snapshot {
-    let ready = readiness(&state.model_path);
+    let ready = readiness(&state);
     state.handle.send(Command::SetReady(ready));
     let core = state.handle.snapshot(IPC_TIMEOUT);
     let mic_test_active = state
@@ -247,9 +257,7 @@ fn get_snapshot(app: AppHandle, state: State<'_, AppState>) -> Snapshot {
         ready_error: ready.err(),
         accessibility: format!("{:?}", dictation_platform::accessibility_permission()),
         worker_found: selftest::worker_path().is_some(),
-        model_installed: state.model_path.is_file(),
-        model_path: state.model_path.display().to_string(),
-        model_source_url: selftest::BASE_MULTILINGUAL.url,
+        active_model: models::active_model(&state).map(|m| m.id),
         settings_revision,
         settings_note: state.config_note.clone(),
         shortcuts: ShortcutStatus {
@@ -434,8 +442,9 @@ fn stop_mic_test(state: State<'_, AppState>) {
 async fn run_worker_selftest(
     state: State<'_, AppState>,
 ) -> Result<selftest::SelftestReport, String> {
-    let model = state.model_path.clone();
-    tauri::async_runtime::spawn_blocking(move || selftest::run(&model))
+    let m = models::active_model(&state).ok_or("MODEL_UNAVAILABLE")?;
+    let path = state.models.path(m);
+    tauri::async_runtime::spawn_blocking(move || selftest::run(m, &path))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -557,6 +566,8 @@ pub fn run() {
     tauri::Builder::default()
         // Single instance prevents duplicate shortcut and microphone ownership.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_settings(app)))
+        // Rust-only use (model import picker); no dialog permission is granted to webviews.
+        .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| on_shortcut(app, shortcut, event.state == ShortcutState::Pressed))
@@ -580,7 +591,12 @@ pub fn run() {
                 Err(e) => (None, Some(format!("Settings unavailable: {e}"))),
             };
             let cfg = store.as_ref().map(|s| s.get().clone()).unwrap_or_default();
-            let model_path = selftest::model_path(&data_dir);
+            let models = ModelStore::open(&data_dir.join("models")).map_err(|e| e.to_string())?;
+            // Restore the configured model if it is still installed; the worker
+            // re-verifies its hash while loading.
+            let initial = dictation_models::find(&cfg.transcription.model_id)
+                .and_then(|m| models.installed_path(m).map(|path| ModelRef { path, sha256: m.sha256.to_string() }));
+            let model_ref = Arc::new(Mutex::new(initial));
 
             let capture_settings: SharedCaptureSettings = Arc::new(Mutex::new(CaptureSettings {
                 device_id: cfg.audio.device_id.clone(),
@@ -590,8 +606,7 @@ pub fn run() {
             let transcriber = WorkerTranscriber::new(
                 WorkerConfig {
                     exe: selftest::worker_path().unwrap_or_default(),
-                    model: model_path.clone(),
-                    model_sha256: selftest::BASE_MULTILINGUAL.sha256.into(),
+                    model: Arc::clone(&model_ref),
                     language: Arc::clone(&language),
                     job_timeout: Duration::from_secs(60),
                 },
@@ -612,12 +627,14 @@ pub fn run() {
                 1,
             );
             let handle = coordinator.handle();
-            handle.send(Command::SetReady(readiness(&model_path)));
 
             app.manage(AppState {
                 coordinator: Mutex::new(Some(coordinator)),
                 handle,
                 store: Mutex::new(store),
+                models,
+                model_ref,
+                model_ops: Mutex::new(HashMap::new()),
                 config_note: note,
                 capture_settings,
                 language,
@@ -628,8 +645,8 @@ pub fn run() {
                 shortcut_error: Mutex::new(None),
                 mic_test: Mutex::new(None),
                 last_probe: Mutex::new(None),
-                model_path,
             });
+            refresh_readiness(&app.state::<AppState>());
             register_shortcuts(app.handle(), &cfg);
 
             let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
@@ -679,7 +696,15 @@ pub fn run() {
             list_input_devices,
             start_mic_test,
             stop_mic_test,
-            run_worker_selftest
+            run_worker_selftest,
+            models::get_models,
+            models::install_model,
+            models::import_model,
+            models::verify_model,
+            models::cancel_model_operation,
+            models::remove_model,
+            models::activate_model,
+            models::unload_model
         ])
         .run(tauri::generate_context!())
         .expect("error while running Local Dictation");

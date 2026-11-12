@@ -18,12 +18,14 @@ tauri-build = { version = "=2.7.4", features = [] }
 tauri = { version = "=2.12.5", features = ["tray-icon"] }
 tauri-plugin-global-shortcut = "=2.4.1"
 tauri-plugin-single-instance = "=2.5.5"
+tauri-plugin-dialog = "=2.8.4"
 serde.workspace = true
 serde_json.workspace = true
 dictation-domain.workspace = true
 dictation-audio.workspace = true
 dictation-platform.workspace = true
 dictation-coordinator.workspace = true
+dictation-models.workspace = true
 transcription-protocol.workspace = true
 hound.workspace = true
 

@@ -45,9 +45,7 @@ export interface Snapshot {
   readyError: AppError | null;
   accessibility: "Granted" | "Denied" | "NotApplicable";
   workerFound: boolean;
-  modelInstalled: boolean;
-  modelPath: string;
-  modelSourceUrl: string;
+  activeModel: string | null;
   settingsRevision: number;
   settingsNote: string | null;
   shortcuts: { toggle: string; cancel: string; error: string | null };
@@ -75,6 +73,41 @@ export interface Config {
 
 /** JSON merge-patch over Config (validated again in Rust). */
 export type SettingsPatch = { [K in keyof Config]?: Partial<Config[K]> };
+
+export type ModelState =
+  | { kind: "notInstalled" }
+  | { kind: "partial"; bytes: number }
+  | { kind: "installed"; verified: boolean }
+  | { kind: "invalid" };
+
+export interface ModelView {
+  model: {
+    id: string;
+    displayName: string;
+    profile: "balanced" | "quality";
+    fileName: string;
+    bytes: number;
+    engineFormat: string;
+    multilingual: boolean;
+    license: string;
+    source: string;
+  };
+  state: ModelState;
+  active: boolean;
+  busy: boolean;
+}
+
+export interface ModelProgress {
+  id: string;
+  done: number;
+  total: number;
+}
+
+export interface ModelOpFinished {
+  id: string;
+  op: "install" | "import" | "verify";
+  error: string | null;
+}
 
 export interface InputDevice {
   id: string;
@@ -114,6 +147,14 @@ export const discardDraft = (id: string) => invoke<null>("discard_draft", { id }
 export const getSettings = () => invoke<Config>("get_settings");
 export const updateSettings = (expectedRevision: number, patch: SettingsPatch) =>
   invoke<Config>("update_settings", { expectedRevision, patch });
+export const getModels = () => invoke<ModelView[]>("get_models");
+export const installModel = (modelId: string) => invoke<null>("install_model", { modelId });
+export const importModel = (modelId: string) => invoke<null>("import_model", { modelId });
+export const verifyModel = (modelId: string) => invoke<null>("verify_model", { modelId });
+export const cancelModelOperation = (modelId: string) => invoke<null>("cancel_model_operation", { modelId });
+export const removeModel = (modelId: string) => invoke<null>("remove_model", { modelId });
+export const activateModel = (modelId: string) => invoke<null>("activate_model", { modelId });
+export const unloadModel = () => invoke<null>("unload_model");
 export const listInputDevices = () => invoke<InputDevice[]>("list_input_devices");
 export const startMicTest = (deviceId: string | null) => invoke<null>("start_mic_test", { deviceId });
 export const stopMicTest = () => invoke<null>("stop_mic_test");
@@ -131,3 +172,7 @@ export const onMicTestEnded = (cb: (reason: string) => void): Promise<UnlistenFn
   listen<{ reason: string }>("mic_test_ended", (e) => { cb(e.payload.reason); });
 export const onProbeReport = (cb: (r: ProbeReport) => void): Promise<UnlistenFn> =>
   listen<ProbeReport>("probe_report", (e) => { cb(e.payload); });
+export const onModelProgress = (cb: (p: ModelProgress) => void): Promise<UnlistenFn> =>
+  listen<ModelProgress>("model_progress", (e) => { cb(e.payload); });
+export const onModelOpFinished = (cb: (f: ModelOpFinished) => void): Promise<UnlistenFn> =>
+  listen<ModelOpFinished>("model_op_finished", (e) => { cb(e.payload); });

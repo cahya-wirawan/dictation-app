@@ -127,7 +127,7 @@ fn tmp(name: &str) -> PathBuf {
 
 fn run(
     fake: &Fake,
-    partial: &PathBuf,
+    partial: &std::path::Path,
     cancel_at: Option<u64>,
 ) -> Result<Vec<Progress>, ModelError> {
     let cancel = Cancel::new();

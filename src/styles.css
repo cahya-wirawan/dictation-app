@@ -41,3 +41,7 @@ summary { cursor: pointer; color: var(--muted); }
 .hud-meter { width: 60px; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.25); overflow: hidden; }
 .hud-meter > span { display: block; height: 100%; background: #e5484d; }
 @media (prefers-reduced-motion: reduce) { .meter > div { transition: none; } }
+.models { list-style: none; padding: 0; display: grid; gap: 12px; }
+.models li { display: grid; gap: 6px; padding: 10px; border: 1px solid var(--meter-bg); border-radius: 8px; }
+.models progress { width: 100%; }
+.badge { font-size: 0.75em; padding: 1px 6px; border-radius: 8px; background: var(--accent); color: var(--bg); }
