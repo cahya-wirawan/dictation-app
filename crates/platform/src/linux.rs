@@ -20,8 +20,8 @@ use std::time::Duration;
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
 use x11rb::protocol::xproto::{
-    Atom, AtomEnum, ConnectionExt as _, CreateWindowAux, EventMask, PropMode, SELECTION_NOTIFY_EVENT,
-    SelectionNotifyEvent, Window, WindowClass,
+    Atom, AtomEnum, ConnectionExt as _, CreateWindowAux, EventMask, PropMode,
+    SELECTION_NOTIFY_EVENT, SelectionNotifyEvent, Window, WindowClass,
 };
 use x11rb::wrapper::ConnectionExt as _;
 
@@ -123,12 +123,23 @@ fn portal_has(interface: &str) -> bool {
 // ---------- X11 helpers ----------
 
 fn atom(c: &impl Connection, name: &str) -> Option<Atom> {
-    Some(c.intern_atom(false, name.as_bytes()).ok()?.reply().ok()?.atom)
+    Some(
+        c.intern_atom(false, name.as_bytes())
+            .ok()?
+            .reply()
+            .ok()?
+            .atom,
+    )
 }
 
 fn prop32(c: &impl Connection, w: Window, name: &str, ty: impl Into<Atom>) -> Option<u32> {
     let a = atom(c, name)?;
-    c.get_property(false, w, a, ty, 0, 1).ok()?.reply().ok()?.value32()?.next()
+    c.get_property(false, w, a, ty, 0, 1)
+        .ok()?
+        .reply()
+        .ok()?
+        .value32()?
+        .next()
 }
 
 fn active_window(c: &impl Connection, root: Window) -> Option<Window> {
@@ -142,7 +153,11 @@ fn wm_class(c: &impl Connection, w: Window) -> Option<String> {
         .reply()
         .ok()?;
     // "instance\0class\0": the class is the stable application name.
-    let parts: Vec<&[u8]> = r.value.split(|b| *b == 0).filter(|p| !p.is_empty()).collect();
+    let parts: Vec<&[u8]> = r
+        .value
+        .split(|b| *b == 0)
+        .filter(|p| !p.is_empty())
+        .collect();
     parts
         .last()
         .map(|c| String::from_utf8_lossy(c).to_ascii_lowercase())
@@ -265,7 +280,9 @@ fn serve_clipboard(data: Vec<u8>, ready: &mpsc::Sender<bool>) {
     let fail = || {
         let _ = ready.send(false);
     };
-    let Ok((c, s)) = x11rb::connect(None) else { return fail() };
+    let Ok((c, s)) = x11rb::connect(None) else {
+        return fail();
+    };
     let root = c.setup().roots[s].root;
     let (Some(clipboard), Some(targets), Some(utf8), Some(text_atom), Some(mime)) = (
         atom(&c, "CLIPBOARD"),
@@ -276,10 +293,23 @@ fn serve_clipboard(data: Vec<u8>, ready: &mpsc::Sender<bool>) {
     ) else {
         return fail();
     };
-    let Ok(win) = c.generate_id() else { return fail() };
-    if c
-        .create_window(0, win, root, 0, 0, 1, 1, 0, WindowClass::INPUT_ONLY, 0, &CreateWindowAux::new())
-        .is_err()
+    let Ok(win) = c.generate_id() else {
+        return fail();
+    };
+    if c.create_window(
+        0,
+        win,
+        root,
+        0,
+        0,
+        1,
+        1,
+        0,
+        WindowClass::INPUT_ONLY,
+        0,
+        &CreateWindowAux::new(),
+    )
+    .is_err()
     {
         return fail();
     }
@@ -296,12 +326,23 @@ fn serve_clipboard(data: Vec<u8>, ready: &mpsc::Sender<bool>) {
     while let Ok(ev) = c.wait_for_event() {
         match ev {
             Event::SelectionRequest(req) => {
-                let mut prop = if req.property == x11rb::NONE { req.target } else { req.property };
+                let mut prop = if req.property == x11rb::NONE {
+                    req.target
+                } else {
+                    req.property
+                };
                 let served = if req.target == targets {
-                    c.change_property32(PropMode::REPLACE, req.requestor, prop, AtomEnum::ATOM, &[targets, utf8, text_atom, mime])
-                        .is_ok()
+                    c.change_property32(
+                        PropMode::REPLACE,
+                        req.requestor,
+                        prop,
+                        AtomEnum::ATOM,
+                        &[targets, utf8, text_atom, mime],
+                    )
+                    .is_ok()
                 } else if req.target == utf8 || req.target == text_atom || req.target == mime {
-                    c.change_property8(PropMode::REPLACE, req.requestor, prop, utf8, &data).is_ok()
+                    c.change_property8(PropMode::REPLACE, req.requestor, prop, utf8, &data)
+                        .is_ok()
                 } else {
                     false
                 };
@@ -337,9 +378,22 @@ pub fn clipboard_read_text() -> Option<String> {
     let utf8 = atom(&c, "UTF8_STRING")?;
     let dest = atom(&c, "DICTATION_CLIP")?;
     let win = c.generate_id().ok()?;
-    c.create_window(0, win, root, 0, 0, 1, 1, 0, WindowClass::INPUT_ONLY, 0, &CreateWindowAux::new())
+    c.create_window(
+        0,
+        win,
+        root,
+        0,
+        0,
+        1,
+        1,
+        0,
+        WindowClass::INPUT_ONLY,
+        0,
+        &CreateWindowAux::new(),
+    )
+    .ok()?;
+    c.convert_selection(win, clipboard, utf8, dest, x11rb::CURRENT_TIME)
         .ok()?;
-    c.convert_selection(win, clipboard, utf8, dest, x11rb::CURRENT_TIME).ok()?;
     c.flush().ok()?;
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
     while std::time::Instant::now() < deadline {
@@ -347,7 +401,14 @@ pub fn clipboard_read_text() -> Option<String> {
             Some(Event::SelectionNotify(n)) if n.property == x11rb::NONE => return None,
             Some(Event::SelectionNotify(_)) => {
                 let r = c
-                    .get_property(true, win, dest, AtomEnum::ANY, 0, u32::try_from(MAX_CLIPBOARD_BYTES / 4).unwrap_or(0))
+                    .get_property(
+                        true,
+                        win,
+                        dest,
+                        AtomEnum::ANY,
+                        0,
+                        u32::try_from(MAX_CLIPBOARD_BYTES / 4).unwrap_or(0),
+                    )
                     .ok()?
                     .reply()
                     .ok()?;
@@ -377,8 +438,36 @@ pub fn watch_suspend(on_suspend: std::sync::Arc<dyn Fn() + Send + Sync>) -> Susp
     };
     for signal in ["PrepareForSleep", "PrepareForShutdown"] {
         let (conn, cb) = (conn.clone(), std::sync::Arc::clone(&on_suspend));
-        if let Ok(t) = std::thread::Builder::new().name(format!("logind-{signal}")).spawn(move || {
-            let Ok(p) = zbus::blocking::Proxy::new(
+        if let Ok(t) = std::thread::Builder::new()
+            .name(format!("logind-{signal}"))
+            .spawn(move || {
+                let Ok(p) = zbus::blocking::Proxy::new(
+                    &conn,
+                    "org.freedesktop.login1",
+                    "/org/freedesktop/login1",
+                    "org.freedesktop.login1.Manager",
+                ) else {
+                    return;
+                };
+                let Ok(it) = p.receive_signal(signal) else {
+                    return;
+                };
+                for msg in it {
+                    if msg.body().deserialize::<bool>().unwrap_or(false) {
+                        cb();
+                    }
+                }
+            })
+        {
+            threads.push(t);
+        }
+    }
+    // Lock is a signal on this session's object.
+    let cb = std::sync::Arc::clone(&on_suspend);
+    if let Ok(t) = std::thread::Builder::new()
+        .name("logind-lock".into())
+        .spawn(move || {
+            let Ok(m) = zbus::blocking::Proxy::new(
                 &conn,
                 "org.freedesktop.login1",
                 "/org/freedesktop/login1",
@@ -386,38 +475,28 @@ pub fn watch_suspend(on_suspend: std::sync::Arc<dyn Fn() + Send + Sync>) -> Susp
             ) else {
                 return;
             };
-            let Ok(it) = p.receive_signal(signal) else { return };
-            for msg in it {
-                if msg.body().deserialize::<bool>().unwrap_or(false) {
-                    cb();
-                }
+            let Ok(path) = m.call::<_, _, zbus::zvariant::OwnedObjectPath>(
+                "GetSessionByPID",
+                &(std::process::id(),),
+            ) else {
+                return;
+            };
+            let Ok(s) = zbus::blocking::Proxy::new(
+                &conn,
+                "org.freedesktop.login1",
+                path,
+                "org.freedesktop.login1.Session",
+            ) else {
+                return;
+            };
+            let Ok(it) = s.receive_signal("Lock") else {
+                return;
+            };
+            for _ in it {
+                cb();
             }
-        }) {
-            threads.push(t);
-        }
-    }
-    // Lock is a signal on this session's object.
-    let cb = std::sync::Arc::clone(&on_suspend);
-    if let Ok(t) = std::thread::Builder::new().name("logind-lock".into()).spawn(move || {
-        let Ok(m) = zbus::blocking::Proxy::new(
-            &conn,
-            "org.freedesktop.login1",
-            "/org/freedesktop/login1",
-            "org.freedesktop.login1.Manager",
-        ) else {
-            return;
-        };
-        let Ok(path) = m.call::<_, _, zbus::zvariant::OwnedObjectPath>("GetSessionByPID", &(std::process::id(),)) else {
-            return;
-        };
-        let Ok(s) = zbus::blocking::Proxy::new(&conn, "org.freedesktop.login1", path, "org.freedesktop.login1.Session") else {
-            return;
-        };
-        let Ok(it) = s.receive_signal("Lock") else { return };
-        for _ in it {
-            cb();
-        }
-    }) {
+        })
+    {
         threads.push(t);
     }
     SuspendWatch { _threads: threads }
@@ -482,26 +561,67 @@ mod tests {
         let root = c.setup().roots[s].root;
         let mk = |class: &[u8]| {
             let w = c.generate_id().unwrap();
-            c.create_window(0, w, root, 0, 0, 10, 10, 0, WindowClass::INPUT_OUTPUT, 0, &CreateWindowAux::new())
-                .unwrap();
-            c.change_property32(PropMode::REPLACE, w, atom(&c, "_NET_WM_PID").unwrap(), AtomEnum::CARDINAL, &[std::process::id()])
-                .unwrap();
-            c.change_property8(PropMode::REPLACE, w, AtomEnum::WM_CLASS, AtomEnum::STRING, class).unwrap();
+            c.create_window(
+                0,
+                w,
+                root,
+                0,
+                0,
+                10,
+                10,
+                0,
+                WindowClass::INPUT_OUTPUT,
+                0,
+                &CreateWindowAux::new(),
+            )
+            .unwrap();
+            c.change_property32(
+                PropMode::REPLACE,
+                w,
+                atom(&c, "_NET_WM_PID").unwrap(),
+                AtomEnum::CARDINAL,
+                &[std::process::id()],
+            )
+            .unwrap();
+            c.change_property8(
+                PropMode::REPLACE,
+                w,
+                AtomEnum::WM_CLASS,
+                AtomEnum::STRING,
+                class,
+            )
+            .unwrap();
             w
         };
         let a = mk(b"editor\0Editor\0");
         let b = mk(b"other\0Other\0");
         let set_active = |w: u32| {
-            c.change_property32(PropMode::REPLACE, root, atom(&c, "_NET_ACTIVE_WINDOW").unwrap(), AtomEnum::WINDOW, &[w])
-                .unwrap();
+            c.change_property32(
+                PropMode::REPLACE,
+                root,
+                atom(&c, "_NET_ACTIVE_WINDOW").unwrap(),
+                AtomEnum::WINDOW,
+                &[w],
+            )
+            .unwrap();
             c.flush().unwrap();
         };
         set_active(a);
         assert!(probe().ewmh_active_window);
         let t = capture_target().unwrap();
-        assert_eq!(t.app.as_ref().and_then(|a| a.bundle_id.as_deref()), Some("editor"));
-        assert_eq!(t.app.as_ref().map(|a| a.pid), i32::try_from(std::process::id()).ok());
-        assert_eq!(check_target(&t), TargetCheck::Unknown, "unchanged window is still not deliverable");
+        assert_eq!(
+            t.app.as_ref().and_then(|a| a.bundle_id.as_deref()),
+            Some("editor")
+        );
+        assert_eq!(
+            t.app.as_ref().map(|a| a.pid),
+            i32::try_from(std::process::id()).ok()
+        );
+        assert_eq!(
+            check_target(&t),
+            TargetCheck::Unknown,
+            "unchanged window is still not deliverable"
+        );
         set_active(b);
         assert_eq!(check_target(&t), TargetCheck::WindowChanged);
     }

@@ -1,6 +1,6 @@
 # Implementation status
 
-Last updated: 13 November 2026 · **M0 partially complete · M1–M6 implemented, native GUI runs and release credentials pending** · Version 0.7.0
+Last updated: 13 November 2026 · **M0 partially complete · M1–M7 implemented, native GUI runs and release credentials pending** · Version 0.7.0
 
 **M0 is not done.** Its exit evidence must come from a macOS Apple Silicon release-like build (docs/07 §2), and no Mac has run this code yet. This round ran on a headless Linux host. Everything that can be proven without a display, microphone or macOS is proven below. Everything else is written but marked **unverified**.
 
@@ -53,6 +53,22 @@ The Tauri crate compiles and links on macOS, and the bundle layout is correct.
 | eslint / typescript-eslint | 10.14.0 / 8.72.2 | `strictTypeChecked` |
 
 Lockfiles: `Cargo.lock`, `pnpm-lock.yaml`.
+
+## M7: Linux experiments
+
+The exit criterion is a "published limited support matrix; no broad support claim" (docs/07 §2). **Met**, in `docs/PLATFORM_SUPPORT.md` → Linux. No physical Linux desktop was available, so no desktop or compositor is named as supported.
+
+| Item | Where | Evidence |
+|---|---|---|
+| **Session probe** | `crates/platform/src/linux.rs` (`probe`) | Reports session type, desktop, X11 reachability, EWMH window manager, whether the global shortcut is reliable, a *running* portal's GlobalShortcuts interface, and logind. Every D-Bus call has a 1 s method timeout. **Finding:** the first version took 120 s on a headless host, because introspecting `org.freedesktop.portal.Desktop` D-Bus-activated the portal in a session with no desktop. The probe now inspects only a portal that is already running. |
+| **Window identity (X11)** | `capture_target`, `check_target` | `_NET_ACTIVE_WINDOW`, `_NET_WM_PID`, lower-case `WM_CLASS`, and the process start time from `/proc/<pid>/stat` (PID reuse). The field is always Unknown, so `check_target` never returns `Same`. **Tested under Xvfb:** a simulated EWMH window manager switches the active window and gives `WindowChanged`; the app is identified by `WM_CLASS` and pid. |
+| **Copy (X11 CLIPBOARD owner)** | `clipboard_write_text` | A server thread owns `CLIPBOARD` and serves `TARGETS`, `UTF8_STRING`, `TEXT` and `text/plain;charset=utf-8`. It exits on `SelectionClear`. Ownership is confirmed within 500 ms; text is limited to 64 KiB, so INCR is never needed. **Tested under Xvfb:** an exact Unicode round trip read back by a separate X client, and handover to a newer copy. Before M7, Copy did not work on Linux at all. |
+| **Sleep, shutdown, lock** | `watch_suspend` | logind `PrepareForSleep(true)`, `PrepareForShutdown(true)`, and `Lock` on the session from `GetSessionByPID`. The watch starts without blocking (tested). Firing it needs a real sleep or lock, which was not done. |
+| **Automatic paste** | n/a | **Off by design.** No editable-element identity (docs/05 §4). AT-SPI was not attempted within the time box. |
+| **UI** | `src/components/SessionNotice.tsx`, `Snapshot.session` | On Linux the app explains three things: drafts instead of paste; on Wayland, use Start in the window; Copy unavailable without X11/XWayland. These come from the probe, which runs once at startup. |
+| **Packaging** | CI `linux-package`, `scripts/verify-linux-deb.sh` | A `.deb` for Ubuntu 24.04: install with apt, run inference through `/usr/bin/dictation-worker`, remove. AppImage, Flatpak and RPM were not attempted. |
+
+**Measured on this host (Ubuntu 22.04, tty, no display):** probe `kind: none`, `x11_reachable: false`, `logind: true`. **Under Xvfb:** `kind: x11`, `x11_reachable: true`, `ewmh_active_window: false` (no window manager).
 
 ## M6: Windows
 
