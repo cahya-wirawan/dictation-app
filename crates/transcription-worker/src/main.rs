@@ -203,7 +203,25 @@ fn open_no_follow(path: &Path) -> std::io::Result<File> {
         .open(path)
 }
 
-#[cfg(not(unix))]
+/// Opens the reparse point itself (symlink or junction) instead of its target,
+/// then rejects it from the *opened handle's* attributes: no check-then-open race.
+#[cfg(windows)]
+fn open_no_follow(path: &Path) -> std::io::Result<File> {
+    use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+    let f = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)?;
+    let meta = f.metadata()?;
+    if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 || !meta.is_file() {
+        return Err(std::io::Error::other("not a regular file"));
+    }
+    Ok(f)
+}
+
+#[cfg(not(any(unix, windows)))]
 fn open_no_follow(path: &Path) -> std::io::Result<File> {
     let meta = std::fs::symlink_metadata(path)?;
     if !meta.file_type().is_file() {

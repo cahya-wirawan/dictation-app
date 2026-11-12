@@ -21,6 +21,7 @@ use dictation_domain::{SessionId, WorkerEpoch};
 use transcription_protocol::Language;
 
 const T: Duration = Duration::from_secs(30);
+const REAL_T: Duration = Duration::from_secs(150);
 const BASE_SHA256: &str = "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe";
 
 fn repo() -> PathBuf {
@@ -213,6 +214,14 @@ impl Rig {
 
     fn next_outcome(&self) -> Outcome {
         self.outcomes.recv_timeout(T).expect("no outcome")
+    }
+
+    /// Real inference on a loaded shared host can exceed `T`; the worker's
+    /// own job timeout (60 s) still bounds each job.
+    fn next_real_outcome(&self) -> Outcome {
+        self.outcomes
+            .recv_timeout(REAL_T)
+            .expect("no outcome from the real worker")
     }
 
     fn snapshot(&self) -> Snapshot {
@@ -550,7 +559,7 @@ fn real_worker_end_to_end_and_cancel_respawn() {
     );
     r.h.send(Command::Toggle);
     assert_eq!(
-        r.next_outcome(),
+        r.next_real_outcome(),
         Outcome::DraftReady(DraftReason::ReviewMode)
     );
     let d = r.h.draft(T).unwrap();
@@ -561,7 +570,7 @@ fn real_worker_end_to_end_and_cancel_respawn() {
     );
     r.assert_mic_closed();
     r.h.send(Command::DraftDiscard { id: d.id });
-    assert_eq!(r.next_outcome(), Outcome::DraftDiscarded);
+    assert_eq!(r.next_real_outcome(), Outcome::DraftDiscarded);
 
     // Cancel during real inference, then a new session on the respawned worker.
     r.h.send(Command::Toggle);
@@ -571,11 +580,11 @@ fn real_worker_end_to_end_and_cancel_respawn() {
         std::thread::sleep(Duration::from_millis(2));
     }
     r.h.send(Command::Cancel);
-    assert_eq!(r.next_outcome(), Outcome::Canceled);
+    assert_eq!(r.next_real_outcome(), Outcome::Canceled);
     assert_eq!(r.snapshot().worker_epoch, 1);
     r.h.send(Command::Toggle);
     assert_eq!(
-        r.next_outcome(),
+        r.next_real_outcome(),
         Outcome::DraftReady(DraftReason::ReviewMode)
     );
     assert!(normalize(&r.h.draft(T).unwrap().text).contains("my fellow americans"));
@@ -609,13 +618,13 @@ fn model_switch_is_exclusive_with_sessions() {
         Err(AppError::Busy)
     );
     r.h.send(Command::Cancel);
-    assert_eq!(r.next_outcome(), Outcome::Canceled);
+    assert_eq!(r.next_real_outcome(), Outcome::Canceled);
     // While switching: starting is refused.
     let pending = switch(&r.h, dummy_model());
     std::thread::sleep(Duration::from_millis(50));
     assert!(r.snapshot().switching_model);
     r.h.send(Command::Toggle);
-    assert_eq!(r.next_outcome(), Outcome::Rejected(AppError::Busy));
+    assert_eq!(r.next_real_outcome(), Outcome::Rejected(AppError::Busy));
     assert_eq!(pending.recv_timeout(T).unwrap(), Ok(()));
     assert!(!r.snapshot().switching_model);
     assert_eq!(
@@ -658,14 +667,14 @@ fn real_worker_model_switch_keeps_previous_on_failure_and_unload() {
     );
     r.h.send(Command::Toggle);
     assert_eq!(
-        r.next_outcome(),
+        r.next_real_outcome(),
         Outcome::DraftReady(DraftReason::ReviewMode)
     );
     assert!(normalize(&r.h.draft(T).unwrap().text).contains("fellow americans"));
     r.h.send(Command::DraftDiscard {
         id: r.h.draft(T).unwrap().id,
     });
-    assert_eq!(r.next_outcome(), Outcome::DraftDiscarded);
+    assert_eq!(r.next_real_outcome(), Outcome::DraftDiscarded);
 
     // A valid switch (re-activating the same model) loads, smoke-tests and swaps.
     assert_eq!(
@@ -678,13 +687,13 @@ fn real_worker_model_switch_keeps_previous_on_failure_and_unload() {
     assert!(epoch >= 1);
     r.h.send(Command::Toggle);
     assert_eq!(
-        r.next_outcome(),
+        r.next_real_outcome(),
         Outcome::DraftReady(DraftReason::ReviewMode)
     );
     r.h.send(Command::DraftDiscard {
         id: r.h.draft(T).unwrap().id,
     });
-    assert_eq!(r.next_outcome(), Outcome::DraftDiscarded);
+    assert_eq!(r.next_real_outcome(), Outcome::DraftDiscarded);
 
     // Unload: the next session cannot transcribe.
     let (tx, rx) = mpsc::channel();
@@ -692,7 +701,7 @@ fn real_worker_model_switch_keeps_previous_on_failure_and_unload() {
     assert_eq!(rx.recv_timeout(T).unwrap(), Ok(()));
     r.h.send(Command::Toggle);
     assert_eq!(
-        r.next_outcome(),
+        r.next_real_outcome(),
         Outcome::Failed(AppError::ModelUnavailable)
     );
     r.assert_mic_closed();

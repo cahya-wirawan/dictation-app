@@ -65,7 +65,8 @@
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
-      "icons/icon.png"
+      "icons/icon.png",
+      "icons/icon.ico"
     ],
     "externalBin": [
       "binaries/dictation-worker"
@@ -82,6 +83,16 @@
     },
     "copyright": "Local Dictation contributors",
     "category": "Productivity",
-    "shortDescription": "Local, private dictation into any app"
+    "shortDescription": "Local, private dictation into any app",
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false
+      }
+    }
   }
 }

@@ -972,6 +972,7 @@ dependencies = [
  "objc2-core-graphics",
  "objc2-foundation",
  "thiserror 2.0.21",
+ "windows",
 ]
 
 [[package]]
@@ -4807,6 +4808,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "windows",
 ]
 
 [[package]]

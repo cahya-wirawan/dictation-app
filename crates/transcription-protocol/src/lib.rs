@@ -8,6 +8,7 @@
 
 pub mod client;
 pub mod framing;
+mod job;
 pub mod messages;
 
 pub use framing::{FrameError, read_frame, read_pcm, write_frame, write_pcm};

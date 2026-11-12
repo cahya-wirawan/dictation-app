@@ -85,7 +85,7 @@ fn main() {
     }
     if !found.iter().any(|f| f == "whisper") {
         panic!(
-            "whisper.cpp build produced no libwhisper.a under {}",
+            "whisper.cpp build produced no whisper static library under {}",
             dst.display()
         );
     }
@@ -129,7 +129,11 @@ fn static_libs(dir: &Path) -> Vec<String> {
     rd.filter_map(|e| e.ok())
         .filter_map(|e| {
             let name = e.file_name().into_string().ok()?;
-            let stem = name.strip_prefix("lib")?.strip_suffix(".a")?;
+            // Unix/MinGW: libNAME.a; MSVC: NAME.lib.
+            let stem = name
+                .strip_prefix("lib")
+                .and_then(|n| n.strip_suffix(".a"))
+                .or_else(|| name.strip_suffix(".lib"))?;
             Some(stem.to_owned())
         })
         .collect()
