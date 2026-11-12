@@ -1,6 +1,6 @@
 # Implementation status
 
-Last updated: 12 November 2026 · **M0 partially complete · M1–M5 implemented, native GUI run and release credentials pending** · Version 0.5.0
+Last updated: 12 November 2026 · **M0 partially complete · M1–M5 implemented, native GUI run and release credentials pending** · Version 0.6.0
 
 **M0 is not done.** Its exit evidence must come from a macOS Apple Silicon release-like build (docs/07 §2), and no Mac has run this code yet. This round ran on a headless Linux host. Everything that can be proven without a display, microphone or macOS is proven below. Everything else is written but marked **unverified**.
 
