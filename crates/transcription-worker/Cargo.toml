@@ -20,6 +20,9 @@ dictation-domain.workspace = true
 transcription-protocol.workspace = true
 sha2.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [build-dependencies]
 cmake.workspace = true
 cc.workspace = true

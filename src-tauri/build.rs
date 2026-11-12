@@ -17,6 +17,14 @@ fn main() {
         "start_mic_test",
         "stop_mic_test",
         "run_worker_selftest",
+        "get_models",
+        "install_model",
+        "import_model",
+        "verify_model",
+        "cancel_model_operation",
+        "remove_model",
+        "activate_model",
+        "unload_model",
     ]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest))
         .unwrap_or_else(|e| panic!("tauri-build failed: {e:#}"));

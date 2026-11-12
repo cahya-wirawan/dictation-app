@@ -18,10 +18,20 @@ static void dw_quiet_log(enum ggml_log_level level, const char *text, void *user
  * stderr stays a small, redacted diagnostics channel. */
 void dw_silence_logs(void) { whisper_log_set(dw_quiet_log, NULL); }
 
-struct whisper_context *dw_init(const char *path_model, int use_gpu) {
+
+static void dw_noop_close(void *ctx) { (void)ctx; }
+
+typedef size_t (*dw_read_fn)(void *ctx, void *output, size_t read_size);
+typedef bool (*dw_eof_fn)(void *ctx);
+
+/* Loads from caller-provided read callbacks, so the caller can hash exactly
+ * the bytes whisper.cpp consumes from one already-open file descriptor
+ * (no hash-then-reopen race). */
+struct whisper_context *dw_init_from_loader(void *ctx, dw_read_fn read, dw_eof_fn eof, int use_gpu) {
+    struct whisper_model_loader loader = {ctx, read, eof, dw_noop_close};
     struct whisper_context_params p = whisper_context_default_params();
     p.use_gpu = use_gpu != 0;
-    return whisper_init_from_file_with_params(path_model, p);
+    return whisper_init_with_params(&loader, p);
 }
 
 /* Deterministic greedy transcription (docs/03 §5): no translate, no

@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-window",
-  "description": "Settings/review window: status, dictation control, draft review/copy, settings, mic test, worker self-test. No input injection, process, file or URL APIs exist.",
+  "description": "Settings/review window: status, dictation control, draft review/copy, settings, model management (manifest ids only), mic test, worker self-test. No input injection, process, file or URL APIs exist.",
   "windows": [
     "main"
   ],
@@ -21,6 +21,14 @@
     "allow-list-input-devices",
     "allow-start-mic-test",
     "allow-stop-mic-test",
-    "allow-run-worker-selftest"
+    "allow-run-worker-selftest",
+    "allow-get-models",
+    "allow-install-model",
+    "allow-import-model",
+    "allow-verify-model",
+    "allow-cancel-model-operation",
+    "allow-remove-model",
+    "allow-activate-model",
+    "allow-unload-model"
   ]
 }

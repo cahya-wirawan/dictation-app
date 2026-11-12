@@ -17,6 +17,22 @@ All notable changes to Local Dictation are documented here. The format follows [
 
 ## [Unreleased]
 
+Milestone M2 (local engine and models) is complete.
+
+### Added
+
+- **Model manager** (`dictation-models`):
+  - A bundled manifest of Whisper Base and Small (multilingual), pinned to an immutable repo revision, with independently verified checksums.
+  - Resumable HTTPS download with a host allowlist on every redirect, size limits, Content-Range validation and streaming SHA-256.
+  - Offline import, verify and remove, all with private 0600 files.
+- **Models in the app:** download (with progress, cancel and resume), import a file through a Rust-owned picker, verify, use, unload and remove. The first installed model becomes active automatically.
+- **Safe model activation:** a new model is loaded in a fresh worker and smoke-tested before it replaces the current one. A failed load keeps the previous model.
+
+### Changed
+
+- **Single-pass verified model load:** the worker now loads whisper.cpp through a custom loader that hashes the same open, symlink-refusing file descriptor. This closes the hash-then-reopen window and halves model I/O.
+- **Model location:** the app uses the configured model from its private `models` directory. The development-only `DICTATION_MODEL_PATH` override is removed.
+
 ## [0.2.0] - 2026-11-12
 
 Milestone M1 (domain and capture) is complete: the app dictates into a copyable draft. Automatic paste is not enabled yet (M3). The M1 run on the Mac in a GUI session is still pending; see `docs/IMPLEMENTATION_STATUS.md`.

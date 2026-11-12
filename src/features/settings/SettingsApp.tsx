@@ -20,6 +20,7 @@ import {
 import { useEvent } from "../../useEvent";
 import { DictationPanel } from "../dictation/DictationPanel";
 import { DraftPanel } from "../draft/DraftPanel";
+import { ModelsPanel } from "../models/ModelsPanel";
 import { SettingsForm } from "./SettingsForm";
 
 function errorText(e: unknown): string {
@@ -109,6 +110,7 @@ export function SettingsApp() {
 
       <DictationPanel snapshot={snapshot} phase={phase} lastOutcome={lastOutcome} onError={reportError} />
       <DraftPanel phase={phase} outcomeSeq={outcomeSeq} onError={reportError} />
+      <ModelsPanel onChanged={refresh} onError={reportError} />
       <SettingsForm devices={devices} onError={reportError} />
 
       <details>
@@ -120,7 +122,7 @@ export function SettingsApp() {
               <dt>Platform</dt><dd>{snapshot.platform}</dd>
               <dt>Accessibility</dt><dd>{snapshot.accessibility}</dd>
               <dt>Worker binary</dt><dd>{snapshot.workerFound ? "found" : "missing"}</dd>
-              <dt>Model</dt><dd>{snapshot.modelInstalled ? "installed" : "not installed"} <code>{snapshot.modelPath}</code></dd>
+              <dt>Active model</dt><dd>{snapshot.activeModel ?? "none"}</dd>
               <dt>Shortcuts</dt>
               <dd>{snapshot.shortcuts.error ? <span className="error">{snapshot.shortcuts.error}</span> : "registered"}</dd>
             </dl>

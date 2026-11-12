@@ -23,6 +23,7 @@ use dictation_domain::{Generation, SessionId, WorkerEpoch};
 use transcription_protocol::client::{CancelHandle, ClientError, WorkerClient};
 use transcription_protocol::{JobId, Language, WorkerErrorCode};
 
+pub use crate::actor::ModelRef;
 use crate::actor::{AdapterEvent, CaptureAdapter, DeliveryAdapter, Msg, TranscriberAdapter};
 
 /// Opens an audio source for a session on the given device (`None`: the
@@ -172,8 +173,8 @@ impl CaptureAdapter for DspCapture {
 #[derive(Clone)]
 pub struct WorkerConfig {
     pub exe: PathBuf,
-    pub model: PathBuf,
-    pub model_sha256: String,
+    /// Active model; `None` means unloaded (jobs fail with ModelUnavailable).
+    pub model: Arc<Mutex<Option<ModelRef>>>,
     /// Read at every job start, so a language change applies to the next one.
     pub language: Arc<Mutex<Language>>,
     pub job_timeout: Duration,
@@ -189,8 +190,12 @@ pub struct WorkerTranscriber {
     epoch: WorkerEpoch,
 }
 
+/// One second of silence: exercises the full inference path of a freshly
+/// loaded model before it becomes active (docs/03 §6 smoke fixture).
+const SMOKE_SAMPLES: usize = 16_000;
+
 impl WorkerTranscriber {
-    /// Spawns and warms the first worker in the background.
+    /// Spawns and warms the first worker in the background (if a model is set).
     pub fn new(cfg: WorkerConfig, epoch: WorkerEpoch) -> Self {
         let t = Self {
             cfg,
@@ -213,13 +218,18 @@ impl WorkerTranscriber {
             if slot.as_ref().is_some_and(|c| c.epoch() >= epoch) {
                 return;
             }
-            *slot = spawn_loaded(&cfg, epoch, &cancel).ok();
+            *slot = current_model(&cfg).and_then(|m| spawn_loaded(&cfg, &m, epoch, &cancel).ok());
         });
     }
 }
 
+fn current_model(cfg: &WorkerConfig) -> Option<ModelRef> {
+    cfg.model.lock().ok().and_then(|m| m.clone())
+}
+
 fn spawn_loaded(
     cfg: &WorkerConfig,
+    model: &ModelRef,
     epoch: WorkerEpoch,
     cancel: &Mutex<Option<CancelHandle>>,
 ) -> Result<WorkerClient, ClientError> {
@@ -227,7 +237,7 @@ fn spawn_loaded(
     if let Ok(mut h) = cancel.lock() {
         *h = Some(c.cancel_handle());
     }
-    c.load_model(&cfg.model, &cfg.model_sha256, Duration::from_secs(60))?;
+    c.load_model(&model.path, &model.sha256, Duration::from_secs(120))?;
     Ok(c)
 }
 
@@ -265,7 +275,13 @@ impl TranscriberAdapter for WorkerTranscriber {
             };
             // Lazily (re)spawn if the background warm-up failed or lagged.
             if slot.as_ref().is_none_or(|c| c.epoch() != job.worker_epoch) {
-                match spawn_loaded(&cfg, job.worker_epoch, &cancel) {
+                let Some(model) = current_model(&cfg) else {
+                    return send(AdapterEvent::TranscriptionFailed {
+                        job,
+                        error: AppError::ModelUnavailable,
+                    });
+                };
+                match spawn_loaded(&cfg, &model, job.worker_epoch, &cancel) {
                     Ok(c) => *slot = Some(c),
                     Err(e) => {
                         return send(AdapterEvent::TranscriptionFailed {
@@ -314,6 +330,74 @@ impl TranscriberAdapter for WorkerTranscriber {
         }
         self.epoch += 1;
         self.respawn_in_background(self.epoch);
+        self.epoch
+    }
+
+    /// Loads `model` in a *new* worker and runs the smoke fixture. Only on
+    /// success is it swapped in and recorded as current; on failure the new
+    /// worker is discarded and the previous model keeps serving.
+    fn switch_model(&mut self, model: ModelRef, events: Sender<Msg>) {
+        self.epoch += 1;
+        let epoch = self.epoch;
+        let (cfg, client, cancel) = (
+            self.cfg.clone(),
+            Arc::clone(&self.client),
+            Arc::clone(&self.cancel),
+        );
+        thread::spawn(move || {
+            let staging = Mutex::new(None);
+            let result = (|| {
+                let mut c = spawn_loaded(&cfg, &model, epoch, &staging)?;
+                let id = JobId {
+                    session_id: dictation_domain::SessionId::random()
+                        .map_err(|_| ClientError::WorkerExited)?,
+                    generation: 0,
+                    worker_epoch: epoch,
+                };
+                c.transcribe(
+                    id,
+                    Language::auto(),
+                    &[0.0; SMOKE_SAMPLES],
+                    Duration::from_secs(60),
+                )?;
+                Ok::<_, ClientError>(c)
+            })();
+            let outcome = match result {
+                Ok(c) => {
+                    // Waits for any in-flight job (the actor only switches when idle).
+                    if let Ok(mut slot) = client.lock() {
+                        *slot = Some(c); // the old client is dropped: killed and reaped
+                    }
+                    if let (Ok(mut h), Ok(staged)) = (cancel.lock(), staging.lock()) {
+                        h.clone_from(&staged);
+                    }
+                    if let Ok(mut m) = cfg.model.lock() {
+                        *m = Some(model);
+                    }
+                    Ok(epoch)
+                }
+                Err(e) => Err(client_error(&e)),
+            };
+            let _ = events.send(Msg::Adapter(AdapterEvent::ModelSwitched {
+                result: outcome,
+            }));
+        });
+    }
+
+    /// Explicit Unload: kill the worker and forget the model.
+    fn unload(&mut self) -> WorkerEpoch {
+        if let Ok(mut m) = self.cfg.model.lock() {
+            *m = None;
+        }
+        if let Ok(h) = self.cancel.lock()
+            && let Some(h) = h.as_ref()
+        {
+            h.kill();
+        }
+        if let Ok(mut slot) = self.client.lock() {
+            *slot = None;
+        }
+        self.epoch += 1;
         self.epoch
     }
 }

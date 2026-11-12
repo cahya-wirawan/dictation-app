@@ -1,6 +1,6 @@
 # Implementation status
 
-Last updated: 12 November 2026 · **M0 partially complete · M1 (domain and capture) implemented, native GUI run pending** · Version 0.2.0
+Last updated: 12 November 2026 · **M0 partially complete · M1 and M2 implemented, native GUI run pending** · Version 0.2.0
 
 **M0 is not done.** Its exit evidence must come from a macOS Apple Silicon release-like build (docs/07 §2), and no Mac has run this code yet. This round ran on a headless Linux host. Everything that can be proven without a display, microphone or macOS is proven below. Everything else is written but marked **unverified**.
 
@@ -53,6 +53,25 @@ The Tauri crate compiles and links on macOS, and the bundle layout is correct.
 | eslint / typescript-eslint | 10.14.0 / 8.72.2 | `strictTypeChecked` |
 
 Lockfiles: `Cargo.lock`, `pnpm-lock.yaml`.
+
+## M2: local engine and models
+
+The exit criteria are "offline known fixture transcribed; malformed protocol rejected; no orphan worker" (docs/07 §2). They have been met since M0 by the worker tests, on Linux and on the M2 Pro. M2 adds the model manager (B4) and verified activation.
+
+| Item | Where | Evidence |
+|---|---|---|
+| Approved manifest | `crates/models/src/manifest.rs` | Base (147,951,465 B, `60ed5bc3…`) and Small (487,601,967 B, `1be3a9b2…`) multilingual. URLs pin the Hugging Face repo revision `5359861c…`. Both hashes were verified by full independent downloads, not only taken from the server's metadata (docs/06 §5). |
+| Downloader | `crates/models/src/download.rs` | Fake-server tests cover: HTTPS only; allowlisted hosts (`huggingface.co`, `*.hf.co`) checked on every redirect hop; ≤5 redirects; size cap enforced while streaming and against Content-Length; resume only with an exact `Content-Range`, otherwise a restart from 0; hash mismatch or oversize deletes the partial; cancel and transient errors keep it. The real network path (ureq 3.4.2 + rustls, no gzip) installed Base in 3.0 s on the Linux host. |
+| Store | `crates/models/src/store.rs` | `.partial` files never count as installed. Atomic rename after fsync. The `.verified` marker binds hash, size and mtime. Symlinked model files are Invalid. Import copies a user-selected regular file with the same checks. All files are 0600 in a 0700 directory; a resumed partial is tightened too, a gap the tests caught. |
+| Single-pass verified load | `crates/transcription-worker/src/{main,engine}.rs`, `shim.c` | whisper.cpp loads through `whisper_init_with_params` with a custom loader over one `O_NOFOLLOW` descriptor that is hashed as it's read. The context is dropped on a mismatch. This closes the M0 hash-then-reopen window and halves model I/O. |
+| Activation | `WorkerTranscriber::switch_model`, `Command::SwitchModel` | The new model loads in a **fresh** worker, runs a 1 s smoke transcription, and only then is swapped in and saved to settings. Real-worker test: a tampered hash is refused and the previous model keeps transcribing; a valid switch moves to a new epoch; Unload makes the next session fail with ModelUnavailable. Switching is refused during a session, and starting a session is refused during a switch. |
+| App | `src-tauri/src/models.rs`, `src/features/models/` | Commands: `get_models`, `install_model`, `import_model`, `verify_model`, `cancel_model_operation`, `remove_model`, `activate_model`, `unload_model` (main window only, manifest ids only). The import picker is opened by Rust; webviews get no dialog or fs permissions. One operation per model. The active model can't be removed. The first installed model is activated automatically. Progress events are capped at 10 Hz. |
+
+**Not done in M2:**
+
+- Windows job-object child lifetime (M6).
+- Model RSS measurements (docs/08 §5).
+- Small has not been benchmarked against Base yet, so docs/08 §4 quality gates are still open.
 
 ## M1: domain and capture
 
@@ -148,7 +167,7 @@ These numbers are **not** evidence for the PRD targets (trigger p95, stop-to-dis
 5. **`NSRunningApplication.processIdentifier` is documented by Apple as unsuitable for comparing processes** → the target token also keeps the `NSRunningApplication` and compares with `isEqual:`.
 6. **macOS link requirements:** ggml's CPU backend uses vDSP from Accelerate even with BLAS off, so the worker links `-framework Accelerate`. whisper.cpp objects were also being built for the SDK's macOS 27.2 while rustc linked for 11.0. `.cargo/config.toml` now sets `MACOSX_DEPLOYMENT_TARGET=13.0` for rustc, cmake and cc, matching the bundle's `minimumSystemVersion`.
 7. **The portable x86 build needs an explicit SIMD baseline.** With `GGML_NATIVE=OFF`, ggml falls back to SSE only: 10–53 s on the JFK fixture versus 0.9 s native. The portable x86_64 build now enables x86-64-v3 (AVX, AVX2, FMA, F16C, BMI2; Haswell 2013+), which brings it back to 1.0–1.3 s. This becomes the Windows x64 minimum CPU unless an ADR chooses runtime CPU dispatch (`GGML_BACKEND_DL` + `GGML_CPU_ALL_VARIANTS`) instead.
-8. **The worker rejects symlinked model paths** (`symlink_metadata`). A residual window remains between hashing and `whisper_init_from_file` re-opening the same path. That's acceptable only because the model directory is app-private; M2 should load from the already-open, verified file handle or a private copy.
+8. **The worker rejects symlinked model paths.** The M0 window between hashing and re-opening the file was closed in M2 by the single-pass verified load described above.
 
 ## Unresolved feasibility questions (need a Mac)
 
@@ -163,7 +182,7 @@ These numbers are **not** evidence for the PRD targets (trigger p95, stop-to-dis
 ```sh
 git submodule update --init --recursive
 pnpm install
-./scripts/fetch-model.sh                     # downloads + verifies size and SHA-256
+./scripts/fetch-model.sh                     # test fixture model for cargo test (the app installs its own via Settings → Models)
 
 cargo test                                   # all 46 tests, incl. real inference
 cargo run -p dictation-audio --example mic_probe -- --seconds 8         # T0.2
@@ -171,7 +190,7 @@ cargo run -p dictation-platform --example m0_target_probe               # T0.5
 cargo run -p dictation-platform --features m0-diagnostics --example m0_paste_probe   # T0.6
 
 PROFILE=debug ./scripts/stage-worker.sh
-DICTATION_MODEL_PATH=$PWD/.models/ggml-base.bin pnpm tauri dev          # T0.3/T0.4/T0.7 in-app
+pnpm tauri dev                               # T0.3/T0.4/T0.7 in-app (install a model under Settings → Models)
 DICTATION_GGML_NATIVE=OFF ./scripts/stage-worker.sh && pnpm tauri build # release-like bundle
 ```
 
