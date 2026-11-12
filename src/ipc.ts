@@ -41,13 +41,14 @@ export interface Snapshot {
   appVersion: string;
   platform: string;
   phase: Phase | null;
-  draft: { id: string; revision: number; attempted: boolean } | null;
+  draft: { id: string; revision: number; attempted: boolean; expiresInMs: number } | null;
   readyError: AppError | null;
   accessibility: "Granted" | "Denied" | "NotApplicable";
   workerFound: boolean;
   activeModel: string | null;
   settingsRevision: number;
   settingsNote: string | null;
+  onboardingComplete: boolean;
   shortcuts: { toggle: string; cancel: string; error: string | null };
   micTestActive: boolean;
   lastProbe: ProbeReport | null;
@@ -59,16 +60,17 @@ export interface DraftView {
   text: string;
   reason: DraftReason;
   attempted: boolean;
+  expiresInMs: number;
 }
 
 export interface Config {
-  schema_version: 1;
+  schema_version: 2;
   revision: number;
   audio: { device_id: string | null; silence_ms: number; no_speech_timeout_ms: number; max_capture_ms: number };
   transcription: { model_id: string; language: string; backend: "auto" | "cpu" | "metal" };
   delivery: { mode: "auto_paste" | "copy_only"; clipboard_policy: "leave_text" | "preserve"; excluded_apps: string[] };
   shortcuts: { toggle: string; cancel: string; paste_draft: string | null };
-  ui: { show_hud: boolean; launch_at_login: boolean; locale: string };
+  ui: { show_hud: boolean; launch_at_login: boolean; locale: string; onboarding_complete: boolean; reduced_motion: boolean };
 }
 
 /** JSON merge-patch over Config (validated again in Rust). */
@@ -147,6 +149,24 @@ export const discardDraft = (id: string) => invoke<null>("discard_draft", { id }
 export const getSettings = () => invoke<Config>("get_settings");
 export const updateSettings = (expectedRevision: number, patch: SettingsPatch) =>
   invoke<Config>("update_settings", { expectedRevision, patch });
+export type PermissionStatus = "granted" | "denied" | "notDetermined" | "restricted" | "notApplicable";
+export type PermissionKind = "microphone" | "accessibility";
+export interface Permissions {
+  microphone: PermissionStatus;
+  accessibility: PermissionStatus;
+}
+export type ShortcutSlot = "toggle" | "cancel" | "pasteDraft";
+
+export const checkPermissions = () => invoke<Permissions>("check_permissions");
+export const requestPermission = (permission: PermissionKind) => invoke<PermissionStatus>("request_permission", { permission });
+export const openPrivacySettings = (permission: PermissionKind) => invoke<boolean>("open_privacy_settings", { permission });
+export const setShortcut = (slot: ShortcutSlot, chord: string | null) =>
+  invoke<{ chord: string | null }>("set_shortcut", { slot, chord });
+export const pauseShortcuts = () => invoke<null>("pause_shortcuts");
+export const resumeShortcuts = () => invoke<null>("resume_shortcuts");
+export const completeOnboarding = () => invoke<null>("complete_onboarding");
+export const setLaunchAtLogin = (enabled: boolean) => invoke<boolean>("set_launch_at_login", { enabled });
+export const openReview = () => invoke<null>("open_review");
 export const getModels = () => invoke<ModelView[]>("get_models");
 export const installModel = (modelId: string) => invoke<null>("install_model", { modelId });
 export const importModel = (modelId: string) => invoke<null>("import_model", { modelId });
@@ -176,3 +196,5 @@ export const onModelProgress = (cb: (p: ModelProgress) => void): Promise<Unliste
   listen<ModelProgress>("model_progress", (e) => { cb(e.payload); });
 export const onModelOpFinished = (cb: (f: ModelOpFinished) => void): Promise<UnlistenFn> =>
   listen<ModelOpFinished>("model_op_finished", (e) => { cb(e.payload); });
+export const onHudBanner = (cb: (o: Outcome) => void): Promise<UnlistenFn> =>
+  listen<{ outcome: Outcome }>("hud_banner", (e) => { cb(e.payload.outcome); });

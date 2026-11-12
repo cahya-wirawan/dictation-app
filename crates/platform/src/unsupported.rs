@@ -13,6 +13,19 @@ pub fn accessibility_permission() -> Permission {
     Permission::NotApplicable
 }
 
+/// No OS-level gate is known for this platform; capture reports its own errors.
+pub fn permission_status(_kind: PermissionKind) -> PermissionStatus {
+    PermissionStatus::NotApplicable
+}
+
+pub fn request_permission(kind: PermissionKind, done: Box<dyn FnOnce(PermissionStatus) + Send>) {
+    done(permission_status(kind));
+}
+
+pub fn open_privacy_settings(_kind: PermissionKind) -> bool {
+    false
+}
+
 pub fn capture_target() -> Result<TargetSnapshot, PlatformError> {
     Ok(TargetSnapshot {
         app: None,

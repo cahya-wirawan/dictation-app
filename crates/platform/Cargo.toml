@@ -17,9 +17,11 @@ thiserror.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "=0.6.5"
-objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSString", "NSDate"] }
+objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSString", "NSDate", "NSURL"] }
 objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "libc", "NSWorkspace", "NSRunningApplication", "NSPasteboard"] }
-objc2-core-foundation = { version = "=0.3.2", default-features = false, features = ["std", "CFString", "CFBase"] }
+objc2-av-foundation = { version = "=0.3.2", default-features = false, features = ["std", "AVCaptureDevice", "AVMediaFormat", "block2"] }
+block2 = "=0.6.2"
+objc2-core-foundation = { version = "=0.3.2", default-features = false, features = ["std", "CFString", "CFBase", "CFDictionary", "CFNumber"] }
 objc2-application-services = { version = "=0.3.2", default-features = false, features = ["std", "libc", "HIServices", "AXUIElement", "AXError"] }
 objc2-core-graphics = { version = "=0.3.2", default-features = false, features = ["std", "CGEvent", "CGEventTypes", "CGRemoteOperation", "CGEventSource"] }
 libc = "0.2"

@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "review-window",
+  "description": "Review window: authorized draft read/edit/copy/discard only (docs/06 \u00a71).",
+  "windows": [
+    "review"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-get-draft",
+    "allow-edit-draft",
+    "allow-copy-draft",
+    "allow-discard-draft"
+  ]
+}

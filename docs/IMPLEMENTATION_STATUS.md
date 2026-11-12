@@ -1,6 +1,6 @@
 # Implementation status
 
-Last updated: 12 November 2026 · **M0 partially complete · M1–M3 implemented, native GUI run pending** · Version 0.4.0
+Last updated: 12 November 2026 · **M0 partially complete · M1–M4 implemented, native GUI run pending** · Version 0.4.0
 
 **M0 is not done.** Its exit evidence must come from a macOS Apple Silicon release-like build (docs/07 §2), and no Mac has run this code yet. This round ran on a headless Linux host. Everything that can be proven without a display, microphone or macOS is proven below. Everything else is written but marked **unverified**.
 
@@ -53,6 +53,33 @@ The Tauri crate compiles and links on macOS, and the bundle layout is correct.
 | eslint / typescript-eslint | 10.14.0 / 8.72.2 | `strictTypeChecked` |
 
 Lockfiles: `Cargo.lock`, `pnpm-lock.yaml`.
+
+## M4: product UI
+
+The exit criteria are "keyboard-only setup, permission-denial recovery and trial" (docs/07 §2). They are covered by frontend tests in jsdom (vitest + Testing Library) and by macOS builds. VoiceOver and real permission prompts still need a person at the Mac.
+
+| Item | Where | Evidence |
+|---|---|---|
+| **Permissions (macOS)** | `crates/platform/src/macos.rs` | Microphone: `AVCaptureDevice authorizationStatusForMediaType` / `requestAccessForMediaType:completionHandler:`. Accessibility: `AXIsProcessTrustedWithOptions` with the prompt option. Deep links to the Privacy panes via `NSWorkspace openURL`. The status is read from the OS on every check and never cached (docs/04 §6). Other platforms report `notApplicable`. |
+| **Onboarding** | `src/features/onboarding/` | Steps follow docs/02 §2: welcome with the clipboard disclosure → microphone (request on Continue, denial → Settings + Check again, test stops on navigation) → model → shortcut (registration must succeed) → automatic paste or copy-only → trial → done (launch at login, off by default). A step with a requirement can't advance until it is met. Focus moves to each step heading. |
+| **Shortcut capture** | `src/chord.ts`, `ShortcutField`, `set_shortcut` | Layout-independent `KeyboardEvent.code`. It needs a modifier other than Shift alone, and plain Tab still navigates. The global shortcuts pause while the field is focused. The chord is saved only after the OS registers it; on failure the previous chord is restored and a conflict message is shown. |
+| **Settings pages** | `src/features/settings/SettingsApp.tsx` | General, Recording, Shortcuts, Transcription (with Models and Unload), Delivery (mode, exclusions, Accessibility status and enable flow), Privacy (data lifecycle) and About (versions, licenses, engine self-test) per docs/02 §3. A vertical ARIA tablist with arrow-key navigation. |
+| **Review window** | `review.html`, `src/review/`, `capabilities/review.json` | A separate window that deliberately takes focus. Its capability allows **only** get/edit/copy/discard draft. Opening it revokes automatic delivery for an in-flight session. It shows a retention countdown (`expires_in_ms` from the coordinator). Rust also checks the calling window's label for draft commands (docs/06 §1). |
+| **HUD** | `src/hud/`, `TauriNotifier` | Shows phase, level, and elapsed time while listening or transcribing. A 3.5 s banner (no text) appears on Text ready, No speech or failure; a sequence counter means a delayed hide never hides a newer session's HUD. |
+| **Config schema v2** | `crates/domain/src/config.rs` | Adds `ui.onboarding_complete` and `ui.reduced_motion`. The v1 → v2 migration is tested and keeps the revision and all settings. Users of earlier builds see onboarding once. |
+| **Launch at login** | `tauri-plugin-autostart` 2.7.0 | A per-user LaunchAgent, opt-in only. No Apple Events automation. |
+| **Accessibility and i18n** | `src/i18n.ts`, styles | Meters are `aria-hidden` with a stable label. Phase and outcome text use `role="status"`; meter values are never announced. Visible focus rings, reduced motion, and a narrow-window layout. Onboarding strings come from an English catalog; German and Indonesian catalogs exist and fall back to English until reviewed translations exist. |
+| **Tests** | `src/**/*.test.ts(x)`, CI frontend job | 13 tests. Onboarding: focus moves to step headings with Tab/Enter only; the microphone step can't be skipped; recovery after denial (Settings + Check again); the model is required. ShortcutField: pause/resume, invalid chords, OS conflict not reported as success, Tab still navigates. Plus chord parsing/display and the completeness of the docs/02 §5 copy. |
+
+**Not done in M4:**
+
+- Adjustable HUD position.
+- Readiness and mode shown in the tray menu.
+- Redacted diagnostics export (docs/06 §6).
+- Reviewed German and Indonesian UI translations.
+- A sleep/lock/logout hook calling `Input::Suspend`. This is required by docs/04 invariant 10 and is tracked for M5 hardening.
+
+**Flaky test seen once:** a full `cargo test` run on the Linux host aborted with 1 failure (44 passed) right after a rebuild, and four repeated runs passed. A timing-sensitive test under CPU load is suspected; it hasn't been identified yet.
 
 ## M3: delivery vertical slice
 
@@ -237,6 +264,9 @@ Record each result here (exact macOS build, Mac model, app versions):
 - [ ] **M1 session:** with the model installed in the app data `models/` directory, press the toggle in TextEdit and say a sentence. Check: the HUD shows Listening and the meter moves; it finishes after a pause; "Transcribing locally…" appears; the settings window shows the text; Copy puts it on the clipboard and the draft clears.
 - [ ] **M1 cancel:** cancel during Listening and during Transcribing (tray or chord). The microphone indicator in the menu bar turns off, and the next session works.
 - [ ] **M1 no idle capture:** with the app idle for a minute, the macOS microphone indicator stays off.
+- [ ] **M4 onboarding:** a fresh start (or settings reset) shows onboarding. Complete it **with the keyboard only**: the microphone prompt appears only after Allow, denial → Open System Settings → Check again works, a model download shows progress, a conflicting shortcut is refused, Accessibility via "Enable automatic paste" → Check again, and the trial shows recognized text.
+- [ ] **M4 VoiceOver:** step headings are announced, the meter is not announced continuously, and phase changes are announced once.
+- [ ] **M4 review window:** tray → Review text… shows the draft with a countdown; Copy and Discard work; the HUD banner appears on Text ready.
 - [ ] Accessibility denied → target capture returns `NotTrusted` and nothing is pasted
 
 ## Not in M0 (next: M1)

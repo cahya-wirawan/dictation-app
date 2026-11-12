@@ -25,6 +25,15 @@ fn main() {
         "remove_model",
         "activate_model",
         "unload_model",
+        "check_permissions",
+        "request_permission",
+        "open_privacy_settings",
+        "set_shortcut",
+        "pause_shortcuts",
+        "resume_shortcuts",
+        "complete_onboarding",
+        "set_launch_at_login",
+        "open_review",
     ]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest))
         .unwrap_or_else(|e| panic!("tauri-build failed: {e:#}"));

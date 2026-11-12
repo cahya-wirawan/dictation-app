@@ -24,6 +24,7 @@ cargo fmt --all
 cargo clippy -p dictation-platform --target aarch64-apple-darwin --all-targets --all-features   # type-check macOS adapter from Linux
 
 pnpm typecheck && pnpm lint && pnpm build # frontend (strict TS, typescript-eslint strictTypeChecked)
+pnpm test                                 # vitest + Testing Library (jsdom); mock ../ipc in component tests
 
 PROFILE=debug ./scripts/stage-worker.sh   # must run before building src-tauri (Tauri externalBin sidecar)
 DICTATION_MODEL_PATH=$PWD/.models/ggml-base.bin pnpm tauri dev
@@ -62,6 +63,7 @@ DICTATION_MODEL_PATH=$PWD/.models/ggml-base.bin pnpm tauri dev
   - `crates/models`: the approved model manifest (the only source of model URLs and hashes), the verified resumable downloader behind a `Fetcher` trait, and the private model store. The app's commands are in `src-tauri/src/models.rs`.
   - `crates/coordinator`: the actor (`actor.rs`), production adapters (`adapters.rs`) and the settings file store. It lives here rather than in `src-tauri` so it can be tested without a webview.
 - **Session core**: `dictation_domain::session::Machine` is a pure reducer: `step(Input) -> Vec<Effect>`, with no clocks or I/O. The actor in `crates/coordinator/src/actor.rs` runs it on one thread and turns effects into adapter calls (`CaptureAdapter`, `TranscriberAdapter`, `DeliveryAdapter`, `Notifier`). Adapters report back only by sending `AdapterEvent`s. Follow-up inputs are queued, never stepped re-entrantly. New behavior belongs in the reducer first (with fixtures in `crates/domain/tests/session_machine.rs`), then in an adapter. Delivery is `PlatformDelivery<P: TargetPlatform>` (`crates/coordinator/src/delivery.rs`). Its thread owns `!Send` native target tokens, and the tests drive it with a scripted `FakePlatform` (`crates/coordinator/tests/delivery.rs`). Only a `DeliveryPrepared(Ok)` processed by the reducer commits the ledger and emits the single `DispatchPaste`.
+- **Windows**: `main` (settings and onboarding, shown on first run until `ui.onboarding_complete`), `review` (draft only), and `hud` (events only). Each has its own capability file. Draft commands also check the window label in Rust (`draft_window`).
 - **Capability scoping**: `src-tauri/build.rs` declares every app command in an `AppManifest`. `src-tauri/capabilities/*.json` grants them per window, and the HUD gets none. A new command must be added in both places, or it is uncallable.
 - **Deviations already recorded as ADRs** in docs/09: ADR-010 (earshot VAD on 16 ms / 256-sample frames instead of WebRTC VAD on 20 ms) and ADR-011 (capture always binds a concrete device id, because CPAL silently reroutes default-device streams).
 

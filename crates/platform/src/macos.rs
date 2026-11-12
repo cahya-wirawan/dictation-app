@@ -8,12 +8,16 @@ use std::ptr::NonNull;
 
 use objc2::rc::Retained;
 use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString, NSRunningApplication, NSWorkspace};
-use objc2_application_services::{AXError, AXIsProcessTrusted, AXUIElement};
-use objc2_core_foundation::{CFEqual, CFRetained, CFString, CFType};
+use objc2_application_services::{
+    AXError, AXIsProcessTrusted, AXIsProcessTrustedWithOptions, AXUIElement,
+    kAXTrustedCheckOptionPrompt,
+};
+use objc2_av_foundation::{AVAuthorizationStatus, AVCaptureDevice, AVMediaTypeAudio};
+use objc2_core_foundation::{CFBoolean, CFDictionary, CFEqual, CFRetained, CFString, CFType};
 use objc2_core_graphics::{
     CGEvent, CGEventFlags, CGEventSource, CGEventSourceStateID, CGEventTapLocation,
 };
-use objc2_foundation::NSString;
+use objc2_foundation::{NSString, NSURL};
 
 use crate::*;
 
@@ -37,6 +41,85 @@ impl std::fmt::Debug for TargetSnapshot {
             .field("has_element", &self.element.is_some())
             .finish()
     }
+}
+
+pub fn permission_status(kind: PermissionKind) -> PermissionStatus {
+    match kind {
+        PermissionKind::Accessibility => {
+            if accessibility_permission() == Permission::Granted {
+                PermissionStatus::Granted
+            } else {
+                // AX has no "not determined": untrusted until the user enables it.
+                PermissionStatus::Denied
+            }
+        }
+        PermissionKind::Microphone => {
+            // SAFETY: static AVFoundation constant; class method without side effects.
+            let Some(audio) = (unsafe { AVMediaTypeAudio }) else {
+                return PermissionStatus::NotApplicable;
+            };
+            match unsafe { AVCaptureDevice::authorizationStatusForMediaType(audio) } {
+                AVAuthorizationStatus::Authorized => PermissionStatus::Granted,
+                AVAuthorizationStatus::Denied => PermissionStatus::Denied,
+                AVAuthorizationStatus::Restricted => PermissionStatus::Restricted,
+                _ => PermissionStatus::NotDetermined,
+            }
+        }
+    }
+}
+
+/// User-initiated request (docs/05 §2): the microphone shows the system
+/// prompt once; Accessibility shows the "open System Settings" prompt. The
+/// callback gets the status afterwards (Accessibility is granted in System
+/// Settings, so callers must re-check later).
+pub fn request_permission(kind: PermissionKind, done: Box<dyn FnOnce(PermissionStatus) + Send>) {
+    match kind {
+        PermissionKind::Accessibility => {
+            let key: &CFString = unsafe { kAXTrustedCheckOptionPrompt };
+            let value = CFBoolean::new(true);
+            let opts = CFDictionary::<CFString, CFBoolean>::from_slices(&[key], &[value]);
+            // SAFETY: dictionary with the documented key/value types.
+            let trusted = unsafe { AXIsProcessTrustedWithOptions(Some(opts.as_ref())) };
+            done(if trusted {
+                PermissionStatus::Granted
+            } else {
+                PermissionStatus::Denied
+            });
+        }
+        PermissionKind::Microphone => {
+            let Some(audio) = (unsafe { AVMediaTypeAudio }) else {
+                return done(PermissionStatus::NotApplicable);
+            };
+            if permission_status(kind) != PermissionStatus::NotDetermined {
+                return done(permission_status(kind));
+            }
+            let slot = std::sync::Mutex::new(Some(done));
+            let block = block2::RcBlock::new(move |granted: objc2::runtime::Bool| {
+                if let Some(f) = slot.lock().ok().and_then(|mut s| s.take()) {
+                    f(if granted.as_bool() {
+                        PermissionStatus::Granted
+                    } else {
+                        PermissionStatus::Denied
+                    });
+                }
+            });
+            // SAFETY: valid media type and a block that outlives the call (retained by AVFoundation).
+            unsafe { AVCaptureDevice::requestAccessForMediaType_completionHandler(audio, &block) };
+        }
+    }
+}
+
+/// Opens the matching Privacy & Security pane. Returns false if it failed.
+pub fn open_privacy_settings(kind: PermissionKind) -> bool {
+    let pane = match kind {
+        PermissionKind::Microphone => "Privacy_Microphone",
+        PermissionKind::Accessibility => "Privacy_Accessibility",
+    };
+    let url = format!("x-apple.systempreferences:com.apple.preference.security?{pane}");
+    let Some(url) = NSURL::URLWithString(&NSString::from_str(&url)) else {
+        return false;
+    };
+    NSWorkspace::sharedWorkspace().openURL(&url)
 }
 
 pub fn accessibility_permission() -> Permission {
