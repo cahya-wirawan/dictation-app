@@ -1,6 +1,6 @@
 # Implementation status
 
-Last updated: 12 November 2026 · Milestone: **M0 (feasibility and pins) — partially complete** · Version 0.1.0+
+Last updated: 12 November 2026 · **M0 partially complete · M1 (domain and capture) implemented, native GUI run pending** · Version 0.1.0+
 
 **M0 is not done.** Its exit evidence must come from a macOS Apple Silicon release-like build (docs/07 §2), and no Mac has run this code yet. This round ran on a headless Linux host. Everything that can be proven without a display, microphone or macOS is proven below. Everything else is written but marked **unverified**.
 
@@ -53,6 +53,37 @@ The Tauri crate compiles and links on macOS, and the bundle layout is correct.
 | eslint / typescript-eslint | 10.14.0 / 8.72.2 | `strictTypeChecked` |
 
 Lockfiles: `Cargo.lock`, `pnpm-lock.yaml`.
+
+## M1: domain and capture
+
+The exit criterion is "deterministic state/audio fixtures and no idle capture" (docs/07 §2). It is met by automated tests on Linux and on the M2 Pro. What's still open is a person running the app on the Mac: microphone permission and a real spoken session.
+
+| Work package | Where | Evidence |
+|---|---|---|
+| **A1:** pure session reducer | `crates/domain/src/session.rs` | 21 transition fixtures, plus a seeded phase-aware fuzz test (400 runs × 60 steps; about 1,000 dispatches and 140 pre-commit cancels per run of the suite) asserting its invariants. |
+| **Config:** schema, validation, persistence | `crates/domain/src/config.rs`, `crates/coordinator/src/config_store.rs` | Ranges from docs/01 §5. RFC 7386 merge-patch with revision conflicts. 0600 file in a 0700 directory, fsynced temp sibling + rename. Corrupt or oversized files are backed up. Future-schema files are never overwritten. |
+| **A2:** DSP worker | `crates/audio/src/dsp.rs` | 9 fault-injection tests. The microphone is closed before every terminal event; overflow, disconnect and NaN abort with no partial utterance; dropping a session closes the device; the meter stays ≤15 Hz. |
+| A3: endpointing | done in M0 | |
+| **Coordinator actor and adapters** | `crates/coordinator/src/{actor,adapters}.rs` | 10 end-to-end tests with a fake microphone. They assert `capture_open == false` and the fake mic closed after every path. One test uses the real worker on jfk.wav, including cancel during inference and respawn with a new epoch. |
+| **Tauri wiring** | `src-tauri/src/lib.rs`, `src/` | Covered below. |
+
+**Tauri wiring:**
+
+- **Inputs:** the toggle and cancel shortcuts and the tray Cancel item send commands to the coordinator.
+- **HUD:** shown and hidden by phase; it gets phase and level events only.
+- **Settings window:** shows phase and outcomes in the docs/02 §5 copy, holds the memory-only draft (edit, copy, discard) and the live settings form (device, language, silence, no-speech timeout, HUD).
+- **Scoping:** every new command is permitted for the main window only.
+- **Verification:** strict clippy passes on Linux (stub libs) and on macOS. The app has not been launched in a GUI session.
+
+**Deliberate M1 limits:**
+
+- **Delivery is copy-only.** `CopyOnlyDelivery` never pastes. Automatic delivery and the explicit paste-draft shortcut arrive in M3 (C1–C3); the reducer and actor already implement the commit ledger for them.
+- **No sleep/lock/logout hook yet.** `Input::Suspend` exists and is tested; the OS notification adapter still has to call it.
+- **IPC request ids are not deduplicated yet** (docs/04 §3), and TypeScript bindings are still hand-written in `src/ipc.ts`.
+- **The coordinator lives in `crates/coordinator`**, not `src-tauri/src/coordinator/` as docs/03 §2 suggests, so it can be tested without a webview (docs/07 §5).
+- **The worker respawns in the background after every hard cancel.** On CPU that takes about 165 ms. With Metal it would take about 5 s, so Metal stays off.
+
+**Bug found by the tests:** effects that fed follow-up inputs straight back into the reducer reported `Listening` before `Starting` to the UI. The actor now queues follow-up inputs until all of the current input's effects have run.
 
 ## M0 tasks
 
@@ -154,6 +185,9 @@ Record each result here (exact macOS build, Mac model, app versions):
 - [x] Release-like bundle builds on macOS 26.6.2 / M2 Pro; sidecar present (verified over SSH)
 - [ ] Settings → "Transcribe test fixture" in the release-like bundle: engine v1.9.5, fixture text correct, worker reaped
 - [ ] Quit from the tray: no `dictation-worker` process left (`pgrep dictation-worker`)
+- [ ] **M1 session:** with the model installed in the app data `models/` directory, press the toggle in TextEdit and say a sentence. Check: the HUD shows Listening and the meter moves; it finishes after a pause; "Transcribing locally…" appears; the settings window shows the text; Copy puts it on the clipboard and the draft clears.
+- [ ] **M1 cancel:** cancel during Listening and during Transcribing (tray or chord). The microphone indicator in the menu bar turns off, and the next session works.
+- [ ] **M1 no idle capture:** with the app idle for a minute, the macOS microphone indicator stays off.
 - [ ] Accessibility denied → target capture returns `NotTrusted` and nothing is pasted
 
 ## Not in M0 (next: M1)

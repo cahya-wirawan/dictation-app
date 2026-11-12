@@ -92,7 +92,7 @@ fn mic_factory(
     probe: MicProbe,
 ) -> SourceFactory {
     let data = Arc::new(data);
-    Box::new(move || {
+    Box::new(move |_device| {
         probe.open.fetch_add(1, Ordering::SeqCst);
         probe.opened_total.fetch_add(1, Ordering::SeqCst);
         Ok(Box::new(FakeMic {
@@ -178,7 +178,10 @@ impl Rig {
             Adapters {
                 capture: Box::new(DspCapture::new(
                     mic_factory(factory_data, chunk, fail_at, mic.clone()),
-                    endpoint,
+                    Arc::new(Mutex::new(CaptureSettings {
+                        device_id: None,
+                        endpoint,
+                    })),
                     DetectorConfig::default(),
                     Duration::from_millis(2),
                 )),
@@ -502,7 +505,7 @@ fn real_worker_cfg() -> Option<WorkerConfig> {
         exe,
         model,
         model_sha256: BASE_SHA256.into(),
-        language: Language::try_from("en".to_string()).unwrap(),
+        language: Arc::new(Mutex::new(Language::try_from("en".to_string()).unwrap())),
         job_timeout: Duration::from_secs(60),
     })
 }

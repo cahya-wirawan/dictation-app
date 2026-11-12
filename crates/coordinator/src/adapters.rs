@@ -25,8 +25,20 @@ use transcription_protocol::{JobId, Language, WorkerErrorCode};
 
 use crate::actor::{AdapterEvent, CaptureAdapter, DeliveryAdapter, Msg, TranscriberAdapter};
 
-/// Opens an audio source for a session. Called on the actor thread.
-pub type SourceFactory = Box<dyn FnMut() -> Result<Box<dyn AudioSource>, CaptureError> + Send>;
+/// Opens an audio source for a session on the given device (`None`: the
+/// current system default). Called on the actor thread.
+pub type SourceFactory =
+    Box<dyn FnMut(Option<&str>) -> Result<Box<dyn AudioSource>, CaptureError> + Send>;
+
+/// Capture settings read at every `open`, so changes apply to the next
+/// capture without restarting anything (docs/04 §3 `update_settings`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CaptureSettings {
+    pub device_id: Option<String>,
+    pub endpoint: EndpointConfig,
+}
+
+pub type SharedCaptureSettings = Arc<Mutex<CaptureSettings>>;
 
 pub fn capture_error(e: CaptureError) -> AppError {
     match e {
@@ -43,16 +55,16 @@ pub fn capture_error(e: CaptureError) -> AppError {
 
 /// Live microphone factory: opens the configured device (or the current
 /// default, resolved to a concrete id; ADR-011).
-pub fn live_source(device_id: Option<String>) -> SourceFactory {
-    Box::new(move || {
-        let (handle, reader) = capture::start(device_id.as_deref())?;
+pub fn live_source() -> SourceFactory {
+    Box::new(move |device_id| {
+        let (handle, reader) = capture::start(device_id)?;
         Ok(Box::new(LiveCapture { handle, reader }) as Box<dyn AudioSource>)
     })
 }
 
 pub struct DspCapture {
     factory: SourceFactory,
-    endpoint: EndpointConfig,
+    settings: SharedCaptureSettings,
     detector: DetectorConfig,
     poll: Duration,
     sessions: HashMap<SessionId, DspSession>,
@@ -61,13 +73,13 @@ pub struct DspCapture {
 impl DspCapture {
     pub fn new(
         factory: SourceFactory,
-        endpoint: EndpointConfig,
+        settings: SharedCaptureSettings,
         detector: DetectorConfig,
         poll: Duration,
     ) -> Self {
         Self {
             factory,
-            endpoint,
+            settings,
             detector,
             poll,
             sessions: HashMap::new(),
@@ -84,7 +96,12 @@ impl CaptureAdapter for DspCapture {
     ) -> Result<(), AppError> {
         // Finished sessions have already closed their device; reap them.
         self.sessions.clear();
-        let source = (self.factory)().map_err(capture_error)?;
+        let settings = self
+            .settings
+            .lock()
+            .map(|s| s.clone())
+            .map_err(|_| AppError::NotReady)?;
+        let source = (self.factory)(settings.device_id.as_deref()).map_err(capture_error)?;
         let sink = move |ev: DspEvent| {
             let e = match ev {
                 DspEvent::Level(level) => AdapterEvent::CaptureLevel {
@@ -130,7 +147,7 @@ impl CaptureAdapter for DspCapture {
         let session = DspSession::spawn(
             source,
             Box::new(EarshotDetector::new(self.detector)),
-            self.endpoint,
+            settings.endpoint,
             self.poll,
             sink,
         )
@@ -157,7 +174,8 @@ pub struct WorkerConfig {
     pub exe: PathBuf,
     pub model: PathBuf,
     pub model_sha256: String,
-    pub language: Language,
+    /// Read at every job start, so a language change applies to the next one.
+    pub language: Arc<Mutex<Language>>,
     pub job_timeout: Duration,
 }
 
@@ -263,7 +281,12 @@ impl TranscriberAdapter for WorkerTranscriber {
                 generation: job.generation,
                 worker_epoch: job.worker_epoch,
             };
-            let result = c.transcribe(id, cfg.language.clone(), &pcm, cfg.job_timeout);
+            let language = cfg
+                .language
+                .lock()
+                .map(|l| l.clone())
+                .unwrap_or_else(|_| Language::auto());
+            let result = c.transcribe(id, language, &pcm, cfg.job_timeout);
             drop(pcm); // no cached audio after the job
             match result {
                 Ok(r) => send(AdapterEvent::TranscriptionDone { job, text: r.text }),

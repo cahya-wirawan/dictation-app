@@ -862,6 +862,7 @@ name = "dictation-app"
 version = "0.1.0"
 dependencies = [
  "dictation-audio",
+ "dictation-coordinator",
  "dictation-domain",
  "dictation-platform",
  "hound",

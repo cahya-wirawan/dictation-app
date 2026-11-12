@@ -4,6 +4,15 @@ fn main() {
     // them per window (the HUD gets none; docs/06 §4).
     let manifest = tauri_build::AppManifest::new().commands(&[
         "get_snapshot",
+        "start_dictation",
+        "stop_dictation",
+        "cancel_dictation",
+        "get_draft",
+        "edit_draft",
+        "copy_draft",
+        "discard_draft",
+        "get_settings",
+        "update_settings",
         "list_input_devices",
         "start_mic_test",
         "stop_mic_test",
