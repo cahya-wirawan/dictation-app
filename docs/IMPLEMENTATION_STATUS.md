@@ -1,10 +1,29 @@
 # Implementation status
 
-Last updated: 12 November 2026 · Milestone: **M0 (feasibility and pins) — partially complete**
+Last updated: 12 November 2026 · Milestone: **M0 (feasibility and pins) — partially complete** · Version 0.1.0+
 
 **M0 is not done.** Its exit evidence must come from a macOS Apple Silicon release-like build (docs/07 §2), and no Mac has run this code yet. This round ran on a headless Linux host. Everything that can be proven without a display, microphone or macOS is proven below. Everything else is written but marked **unverified**.
 
-## Where this round ran
+## Where this ran
+
+### macOS build host (via SSH, no GUI session)
+
+| Item | Value |
+|---|---|
+| Machine | Apple M2 Pro (10 cores), 32 GB RAM |
+| OS | macOS 26.6.2 (25G83), Xcode command line tools at `/Applications/Xcode.app` |
+| Toolchains | Rust 1.93.0; Node 24.22.3, cmake 4.4.5 and pnpm (corepack) installed in user space under `~/.dictation-tools` (remove that directory to undo) |
+| Limitation | SSH sessions cannot be granted Microphone or Accessibility (TCC) permission and cannot see the GUI. Probes that need either still require someone at the Mac. |
+
+On this Mac, these pass:
+
+- `cargo clippy --workspace --all-targets --all-features -D warnings`
+- `cargo test --workspace`: all 46 tests, with real CPU and Metal inference
+- `pnpm tauri build --bundles app`
+
+The Tauri crate compiles and links on macOS, and the bundle layout is correct.
+
+### Linux development host
 
 | Item | Value |
 |---|---|
@@ -41,16 +60,30 @@ Status key: ✅ verified on this host · 🟡 written and compiler-checked, not 
 
 | Task | Status | Evidence / limitation |
 |---|---|---|
-| T0.1 Scaffold, strict lint/typecheck, lockfiles | ✅ / 🟡 | Cargo workspace, Vite + React + strict TS. `pnpm typecheck`, `pnpm lint`, `pnpm build`, `cargo clippy --workspace --all-targets --all-features` all clean. The Tauri crate was only type-checked, for Linux, using pkg-config stubs (no webkit); it was never linked or run. tauri-build did validate both capability files. |
+| T0.1 Scaffold, strict lint/typecheck, lockfiles | ✅ | Cargo workspace, Vite + React + strict TS. All lint and type checks are clean. The Tauri crate compiles, links and bundles on macOS (M2 Pro). It has not been launched in a GUI session. CI: `.github/workflows/ci.yml`. |
 | T0.2 Capture 48/44.1 kHz in Rust; permission in signed bundle | 🟡 | `crates/audio/src/capture.rs` + `examples/mic_probe.rs`. No microphone on this host. Signed-bundle permission test not done. The format → mono → 16 kHz path is verified with fixtures (below). |
 | T0.3 Toggle/cancel chords, repeat filter, modifier release | ✅ logic / 🟡 native | `ChordFilter` unit-tested (holding the chord starts once). Registration code in `src-tauri/src/lib.rs` is unrun. The macOS modifier-release poll (`CGEventSourceFlagsState`, HID state) compiles for aarch64-apple-darwin. |
 | T0.4 Non-activating HUD | 🟡 | HUD window: `focusable: false`, `focus: false`, always-on-top, `ActivationPolicy::Accessory`. Whether `WebviewWindow::show()` on macOS leaves the frontmost app, window, field and caret unchanged is **the open question**; the toggle-shortcut probe measures it. |
 | T0.5 Editable element identity (TextEdit, browser textarea) | 🟡 | `crates/platform/src/macos.rs`: NSRunningApplication (`isEqual:`) + pid + launch date; AX focused window and focused element compared with `CFEqual`; `AXSecureTextField` → Secure. Compiles and passes clippy for aarch64-apple-darwin. Not run. |
 | T0.6 Unicode clipboard + one paste, inspect receiver | 🟡 | `examples/m0_paste_probe.rs`, behind the `m0-diagnostics` feature. Fixed text only. Reads the destination back via AX `AXValue` and reports `RECEIVED` / `DUPLICATED`. No IPC path exists to it. |
-| T0.7 whisper.cpp CPU worker, Base model, 10 s fixture, kill/restart | ✅ (Linux x86_64) | See measurements. Not yet measured on Apple Silicon; bundled-executable naming/signing not verified. |
+| T0.7 whisper.cpp CPU worker, Base model, 10 s fixture, kill/restart | ✅ (Linux x86_64 and Apple M2 Pro) | See measurements. Bundled sidecar naming verified in the `.app`; signing not done. |
 | T0.8 VAD maintenance/license/frames; resampler behavior | ✅ | webrtc-vad rejected (unmaintained since 2019) → earshot (ADR-010). Resampler: 16/22.05/44.1/48/96 kHz, random and 1-sample blocks, single flush, exact output length, 440 Hz preserved. |
 | Signing experiment | ⛔ | Needs a Mac and a Developer ID. |
 | Handoff item 7: this file | ✅ | |
+
+## Measurements: Apple M2 Pro, macOS 26.6.2
+
+Portable worker build (`DICTATION_GGML_NATIVE=OFF`; ggml with Accelerate), JFK fixture 11.0 s, run in isolation (`--test-threads=1`), two runs:
+
+| Backend | Model load (incl. worker SHA-256 re-hash) | Warm inference, 11 s fixture | RTF |
+|---|---|---|---|
+| CPU | 163–166 ms | 385–656 ms (median ≈ 410 ms) | ≈ 0.04 |
+| Metal (`--features metal`) | **5,259 ms** | first job 616 ms, then 108–111 ms | ≈ 0.01 |
+
+- When model tests run in parallel, CPU contention inflates the warm numbers to 0.4–5.6 s. Measure in isolation.
+- Metal's cold load is about 5 s, and every hard cancel kills and respawns the worker. With Metal on, a cancel would add about 5 s before the next dictation can start, unless the next worker is pre-spawned or Metal's shader-compilation cache can be reused. Investigate before Metal becomes a default; CPU already meets the 10 s stop-to-dispatch target with a wide margin.
+- Release bundle: `Local Dictation.app` is 11.7 MiB, version 0.1.0, with the arm64 `dictation-worker` sidecar in `Contents/MacOS`. It is ad-hoc linker-signed with identifier `dictation_app-<hash>`, not the bundle id; real signing must set the identity and entitlements.
+- Not yet measured: peak RSS of parent plus worker, trigger latency, idle CPU (docs/08 §5).
 
 ## Measurements (Linux x86_64 host, *not* reference hardware)
 
@@ -82,7 +115,9 @@ These numbers are **not** evidence for the PRD targets (trigger p95, stop-to-dis
 3. **The earshot frame size is 16 ms**, not 20 ms → ADR-010.
 4. **TypeScript 7 is not usable with typescript-eslint yet** → pinned 6.0.3.
 5. **`NSRunningApplication.processIdentifier` is documented by Apple as unsuitable for comparing processes** → the target token also keeps the `NSRunningApplication` and compares with `isEqual:`.
-6. **The worker rejects symlinked model paths** (`symlink_metadata`). A residual window remains between hashing and `whisper_init_from_file` re-opening the same path. That's acceptable only because the model directory is app-private; M2 should load from the already-open, verified file handle or a private copy.
+6. **macOS link requirements:** ggml's CPU backend uses vDSP from Accelerate even with BLAS off, so the worker links `-framework Accelerate`. whisper.cpp objects were also being built for the SDK's macOS 27.2 while rustc linked for 11.0. `.cargo/config.toml` now sets `MACOSX_DEPLOYMENT_TARGET=13.0` for rustc, cmake and cc, matching the bundle's `minimumSystemVersion`.
+7. **The portable x86 build needs an explicit SIMD baseline.** With `GGML_NATIVE=OFF`, ggml falls back to SSE only: 10–53 s on the JFK fixture versus 0.9 s native. The portable x86_64 build now enables x86-64-v3 (AVX, AVX2, FMA, F16C, BMI2; Haswell 2013+), which brings it back to 1.0–1.3 s. This becomes the Windows x64 minimum CPU unless an ADR chooses runtime CPU dispatch (`GGML_BACKEND_DL` + `GGML_CPU_ALL_VARIANTS`) instead.
+8. **The worker rejects symlinked model paths** (`symlink_metadata`). A residual window remains between hashing and `whisper_init_from_file` re-opening the same path. That's acceptable only because the model directory is app-private; M2 should load from the already-open, verified file handle or a private copy.
 
 ## Unresolved feasibility questions (need a Mac)
 
@@ -90,16 +125,14 @@ These numbers are **not** evidence for the PRD targets (trigger p95, stop-to-dis
 - Does `AXFocusedUIElement` identity stay stable and `CFEqual`-comparable in TextEdit, and in Safari/Chrome textareas? Does a same-window field change get detected?
 - Does `CGEventPost` of Cmd+V (flag on the V events, no synthetic modifier keys) paste exactly once in TextEdit, and does AX `AXValue` read the result back?
 - Microphone TCC prompt and denial behavior inside a signed `.app`; whether the bundled `dictation-worker` sidecar keeps working under signing/notarization (docs/10).
-- Apple Silicon CPU inference latency and RSS for Base; Metal as a gated optimization.
+- RSS for Base on Apple Silicon. CPU latency is measured above. Metal is fast when warm, but its about 5 s cold load per worker spawn is a blocker for the cancel-then-restart flow.
 
 ## Manual checklist on the Mac (macOS 13+, Apple Silicon)
 
 ```sh
 git submodule update --init --recursive
 pnpm install
-mkdir -p .models && curl -L -o .models/ggml-base.bin \
-  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin
-shasum -a 256 .models/ggml-base.bin   # must equal the pinned SHA-256 above
+./scripts/fetch-model.sh                     # downloads + verifies size and SHA-256
 
 cargo test                                   # all 46 tests, incl. real inference
 cargo run -p dictation-audio --example mic_probe -- --seconds 8         # T0.2
@@ -118,6 +151,7 @@ Record each result here (exact macOS build, Mac model, app versions):
 - [ ] HUD probe in TextEdit, Safari textarea, Chrome textarea: result `Same`; caret position unchanged (visual check)
 - [ ] Target probe: app switch → `AppChanged`; new window → `WindowChanged`; other field in the same window → `FieldChanged`; password field → `Secure`
 - [ ] Paste probe in TextEdit: `RECEIVED=true DUPLICATED=false`, Unicode exact (umlauts, em dash, emoji, CJK)
+- [x] Release-like bundle builds on macOS 26.6.2 / M2 Pro; sidecar present (verified over SSH)
 - [ ] Settings → "Transcribe test fixture" in the release-like bundle: engine v1.9.5, fixture text correct, worker reaped
 - [ ] Quit from the tray: no `dictation-worker` process left (`pgrep dictation-worker`)
 - [ ] Accessibility denied → target capture returns `NotTrusted` and nothing is pasted

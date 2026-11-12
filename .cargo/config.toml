@@ -1,0 +1,4 @@
+[env]
+# Single macOS deployment target for rustc, cmake (whisper.cpp) and cc.
+# Keep in sync with bundle.macOS.minimumSystemVersion in src-tauri/tauri.conf.json.
+MACOSX_DEPLOYMENT_TARGET = "13.0"
