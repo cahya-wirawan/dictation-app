@@ -455,7 +455,7 @@ impl Machine {
                     } else {
                         DraftReason::ReviewMode
                     };
-                    self.to_draft(text, reason, false, fx);
+                    self.enter_draft(text, reason, false, fx);
                 }
             }
 
@@ -493,7 +493,13 @@ impl Machine {
                         let text = l.text.take().unwrap_or_default();
                         let rev = l.draft_revision;
                         fx.push(Effect::ReleaseTarget { id });
-                        self.to_draft_with_revision(text, DraftReason::Blocked(e), false, rev, fx);
+                        self.enter_draft_with_revision(
+                            text,
+                            DraftReason::Blocked(e),
+                            false,
+                            rev,
+                            fx,
+                        );
                     }
                 }
             }
@@ -528,7 +534,7 @@ impl Machine {
                         l.ledger = Ledger::Uncertain;
                         let text = l.text.take().unwrap_or_default();
                         let rev = l.draft_revision;
-                        self.to_draft_with_revision(text, DraftReason::Uncertain, true, rev, fx);
+                        self.enter_draft_with_revision(text, DraftReason::Uncertain, true, rev, fx);
                     }
                 }
             }
@@ -756,17 +762,17 @@ impl Machine {
         fx.push(Effect::ReleaseTarget { id });
     }
 
-    fn to_draft(
+    fn enter_draft(
         &mut self,
         text: String,
         reason: DraftReason,
         attempted: bool,
         fx: &mut Vec<Effect>,
     ) {
-        self.to_draft_with_revision(text, reason, attempted, None, fx);
+        self.enter_draft_with_revision(text, reason, attempted, None, fx);
     }
 
-    fn to_draft_with_revision(
+    fn enter_draft_with_revision(
         &mut self,
         text: String,
         reason: DraftReason,

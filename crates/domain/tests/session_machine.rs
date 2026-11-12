@@ -912,15 +912,18 @@ fn fuzz_invariants_hold() {
                 }
             }
             // Structural invariants.
-            match m.phase() {
-                Phase::Idle | Phase::DraftReady => {
-                    assert!(m.live_session().is_none() || m.phase() == Phase::Delivering)
-                }
-                Phase::DraftReady if m.draft().is_none() => panic!("DraftReady without draft"),
-                _ => {}
+            if matches!(m.phase(), Phase::Idle | Phase::DraftReady) {
+                assert!(
+                    m.live_session().is_none(),
+                    "{:?} with a live session",
+                    m.phase()
+                );
             }
             if m.phase() == Phase::DraftReady {
-                assert!(m.draft().is_some());
+                assert!(m.draft().is_some(), "DraftReady without draft");
+            }
+            if m.phase() == Phase::Idle {
+                assert!(m.draft().is_none(), "Idle with a pending draft");
             }
             if matches!(
                 m.phase(),

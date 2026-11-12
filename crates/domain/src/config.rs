@@ -161,7 +161,7 @@ impl Config {
             return Err(invalid("schema_version", "unsupported"));
         }
         let a = &self.audio;
-        if !(500..=2500).contains(&a.silence_ms) || a.silence_ms % 100 != 0 {
+        if !(500..=2500).contains(&a.silence_ms) || !a.silence_ms.is_multiple_of(100) {
             return Err(invalid("audio.silence_ms", "500-2500 in steps of 100"));
         }
         if !(3000..=15_000).contains(&a.no_speech_timeout_ms) {
