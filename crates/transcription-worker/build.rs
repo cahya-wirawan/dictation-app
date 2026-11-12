@@ -100,7 +100,8 @@ fn main() {
                 println!("cargo::rustc-link-lib=framework=MetalKit");
             }
         }
-        "windows" => {}
+        // ggml-cpu reads the CPU name from the registry.
+        "windows" => println!("cargo::rustc-link-lib=advapi32"),
         _ => println!("cargo::rustc-link-lib=stdc++"),
     }
 
