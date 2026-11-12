@@ -22,6 +22,7 @@ export function errorText(e: AppError): string {
     case "INFERENCE_TIMEOUT": return "Local transcription took too long.";
     case "WORKER_CRASH": return "The local transcription engine stopped unexpectedly.";
     case "TARGET_CHANGED": return "Text ready. The focused app changed, so automatic paste was skipped.";
+    case "MODIFIERS_HELD": return "Text ready. The shortcut keys were still held, so automatic paste was skipped.";
     case "PASTE_UNSUPPORTED": return "Automatic paste is unavailable here. Your text is ready to copy.";
     case "CLIPBOARD_BUSY": return "Text ready. The clipboard is busy.";
     case "INPUT_UNCERTAIN": return "The paste may not have completed. Check the destination before resending.";

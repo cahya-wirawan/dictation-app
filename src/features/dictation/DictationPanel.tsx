@@ -36,7 +36,12 @@ export function DictationPanel({ snapshot, phase, lastOutcome, onError }: Props)
         <button type="button" onClick={() => { run(stopDictation()); }} disabled={!listening}>Finish</button>
         <button type="button" onClick={() => { run(cancelDictation()); }} disabled={!busy}>Cancel</button>
       </div>
-      <p className="hint">Automatic paste is not enabled in this build; finished text appears below for you to copy.</p>
+      {snapshot?.accessibility === "Denied" && (
+        <p className="hint">
+          Automatic paste needs Accessibility access for Local Dictation (System Settings → Privacy &amp; Security →
+          Accessibility). Until then, finished text appears below for you to copy.
+        </p>
+      )}
     </section>
   );
 }

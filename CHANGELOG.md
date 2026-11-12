@@ -17,6 +17,19 @@ All notable changes to Local Dictation are documented here. The format follows [
 
 ## [Unreleased]
 
+Milestone M3 (delivery vertical slice) is complete.
+
+### Added
+
+- **Automatic paste** into the app you were dictating into (docs/05):
+  - The target is captured at the shortcut press and re-validated after transcription.
+  - The app waits for you to release the shortcut keys, never releasing them for you.
+  - It writes plain text to the clipboard, re-validates, then sends exactly one paste.
+  - App or field switches, password fields, unknown targets, terminals and excluded apps fall back to a draft. The app never refocuses anything.
+- **Explicit paste for unsent text:** an opt-in `Ctrl+Option+V` pastes the draft into whichever field is focused at that press.
+- **Settings:** a toggle between automatic paste and review-and-copy.
+- **New error code:** `MODIFIERS_HELD`, for when the shortcut keys are still held at paste time.
+
 ## [0.3.0] - 2026-11-12
 
 Milestone M2 (local engine and models) is complete.

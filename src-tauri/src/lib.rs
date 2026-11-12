@@ -5,8 +5,9 @@
 //! file only translates OS/UI events into coordinator commands and coordinator
 //! notifications into scoped window events. There is deliberately no command
 //! that pastes, types, runs a process, reads an arbitrary path or downloads a
-//! URL. Automatic delivery is not enabled yet (M3): sessions end in a
-//! memory-only draft that the user can copy.
+//! URL. Automatic delivery runs through `PlatformDelivery` (crates/coordinator):
+//! one validated clipboard + paste transaction per session, or a memory-only
+//! draft when the target cannot be validated.
 
 mod mictest;
 mod models;
@@ -21,12 +22,14 @@ use dictation_audio::endpoint::EndpointConfig;
 use dictation_coordinator::actor::ModelRef;
 use dictation_coordinator::actor::{Adapters, Command, Coordinator, CoordinatorHandle, Notifier};
 use dictation_coordinator::adapters::{
-    CaptureSettings, CopyOnlyDelivery, DspCapture, SharedCaptureSettings, WorkerConfig,
-    WorkerTranscriber, live_source,
+    CaptureSettings, DspCapture, SharedCaptureSettings, WorkerConfig, WorkerTranscriber,
+    live_source,
 };
 use dictation_coordinator::config_store::{ConfigStore, LoadOutcome};
+use dictation_coordinator::delivery::{NativePlatform, PlatformDelivery, SharedExclusions};
 use dictation_domain::chord::ChordFilter;
 use dictation_domain::config::Config;
+use dictation_domain::config::DeliveryModeSetting;
 use dictation_domain::session::{AppError, DraftReason, Outcome};
 use dictation_domain::{Phase, SessionId};
 use dictation_models::{Cancel, ModelStore};
@@ -54,8 +57,11 @@ pub(crate) struct AppState {
     language: Arc<Mutex<Language>>,
     toggle: Mutex<Option<Shortcut>>,
     cancel: Mutex<Option<Shortcut>>,
+    paste_draft: Mutex<Option<Shortcut>>,
     toggle_filter: Mutex<ChordFilter>,
     cancel_filter: Mutex<ChordFilter>,
+    paste_filter: Mutex<ChordFilter>,
+    excluded: SharedExclusions,
     shortcut_error: Mutex<Option<String>>,
     mic_test: Mutex<Option<MicTest>>,
     last_probe: Mutex<Option<ProbeReport>>,
@@ -357,16 +363,26 @@ fn get_settings(state: State<'_, AppState>) -> Result<Config, String> {
 /// Validated merge-patch with optimistic concurrency; applies to the next capture.
 #[tauri::command]
 fn update_settings(
+    app: AppHandle,
     state: State<'_, AppState>,
     expected_revision: u64,
     patch: serde_json::Value,
 ) -> Result<Config, String> {
-    let mut store = state.store.lock().map_err(|_| "state poisoned")?;
-    let store = store.as_mut().ok_or("settings unavailable")?;
-    let cfg = store
-        .update(expected_revision, &patch)
-        .map_err(|e| e.to_string())?
-        .clone();
+    let (cfg, shortcuts_changed) = {
+        let mut store = state.store.lock().map_err(|_| "state poisoned")?;
+        let store = store.as_mut().ok_or("settings unavailable")?;
+        let before = store.get().shortcuts.clone();
+        let cfg = store
+            .update(expected_revision, &patch)
+            .map_err(|e| e.to_string())?
+            .clone();
+        let changed = cfg.shortcuts != before;
+        (cfg, changed)
+    };
+    apply_delivery_settings(&state, &cfg);
+    if shortcuts_changed {
+        register_shortcuts(&app, &cfg);
+    }
     if let Ok(mut c) = state.capture_settings.lock() {
         *c = CaptureSettings {
             device_id: cfg.audio.device_id.clone(),
@@ -474,6 +490,15 @@ fn run_hud_probe(app: AppHandle) {
     });
 }
 
+fn apply_delivery_settings(state: &AppState, cfg: &Config) {
+    state.handle.send(Command::SetAutoDelivery(
+        cfg.delivery.mode == DeliveryModeSetting::AutoPaste,
+    ));
+    if let Ok(mut e) = state.excluded.lock() {
+        e.clone_from(&cfg.delivery.excluded_apps);
+    }
+}
+
 fn on_shortcut(app: &AppHandle, shortcut: &Shortcut, pressed: bool) {
     let Some(state) = app.try_state::<AppState>() else {
         return;
@@ -505,6 +530,19 @@ fn on_shortcut(app: &AppHandle, shortcut: &Shortcut, pressed: bool) {
             .is_ok_and(|mut f| f.on_event(pressed))
     {
         state.handle.send(Command::Cancel);
+    } else if is(&state.paste_draft)
+        && state
+            .paste_filter
+            .lock()
+            .is_ok_and(|mut f| f.on_event(pressed))
+    {
+        // Explicit delivery: the target is the field focused at this press.
+        if let Some(d) = state.handle.snapshot(IPC_TIMEOUT).and_then(|s| s.draft) {
+            state.handle.send(Command::DraftPaste {
+                id: d.id,
+                revision: d.revision,
+            });
+        }
     }
 }
 
@@ -532,16 +570,28 @@ fn quit(app: &AppHandle) {
     app.exit(0);
 }
 
+/// (Re)registers the configured chords. Previously registered chords are
+/// released first, so a changed setting never leaves a stale global shortcut.
 fn register_shortcuts(app: &AppHandle, cfg: &Config) {
     let Some(state) = app.try_state::<AppState>() else {
         return;
     };
     let gs = app.global_shortcut();
     let mut errors = vec![];
-    for (chord, slot) in [
-        (&cfg.shortcuts.toggle, &state.toggle),
-        (&cfg.shortcuts.cancel, &state.cancel),
-    ] {
+    let wanted = [
+        (Some(&cfg.shortcuts.toggle), &state.toggle),
+        (Some(&cfg.shortcuts.cancel), &state.cancel),
+        (cfg.shortcuts.paste_draft.as_ref(), &state.paste_draft),
+    ];
+    for (_, slot) in &wanted {
+        if let Ok(mut slot) = slot.lock()
+            && let Some(old) = slot.take()
+        {
+            let _ = gs.unregister(old);
+        }
+    }
+    for (chord, slot) in wanted {
+        let Some(chord) = chord else { continue };
         match chord.parse::<Shortcut>() {
             Ok(s) => match gs.register(s) {
                 Ok(()) => {
@@ -554,10 +604,8 @@ fn register_shortcuts(app: &AppHandle, cfg: &Config) {
             Err(e) => errors.push(format!("invalid shortcut {chord}: {e}")),
         }
     }
-    if !errors.is_empty()
-        && let Ok(mut slot) = state.shortcut_error.lock()
-    {
-        *slot = Some(errors.join("; "));
+    if let Ok(mut slot) = state.shortcut_error.lock() {
+        *slot = (!errors.is_empty()).then(|| errors.join("; "));
     }
 }
 
@@ -603,6 +651,7 @@ pub fn run() {
                 endpoint: endpoint_from(&cfg),
             }));
             let language = Arc::new(Mutex::new(language_from(&cfg)));
+            let excluded: SharedExclusions = Arc::new(Mutex::new(cfg.delivery.excluded_apps.clone()));
             let transcriber = WorkerTranscriber::new(
                 WorkerConfig {
                     exe: selftest::worker_path().unwrap_or_default(),
@@ -621,7 +670,7 @@ pub fn run() {
                         Duration::from_millis(10),
                     )),
                     transcriber: Box::new(transcriber),
-                    delivery: Box::new(CopyOnlyDelivery),
+                    delivery: Box::new(PlatformDelivery::spawn(|| NativePlatform, Arc::clone(&excluded))),
                     notifier: Box::new(TauriNotifier { app: app.handle().clone() }),
                 },
                 1,
@@ -640,13 +689,17 @@ pub fn run() {
                 language,
                 toggle: Mutex::new(None),
                 cancel: Mutex::new(None),
+                paste_draft: Mutex::new(None),
                 toggle_filter: Mutex::new(ChordFilter::default()),
                 cancel_filter: Mutex::new(ChordFilter::default()),
+                paste_filter: Mutex::new(ChordFilter::default()),
+                excluded,
                 shortcut_error: Mutex::new(None),
                 mic_test: Mutex::new(None),
                 last_probe: Mutex::new(None),
             });
             refresh_readiness(&app.state::<AppState>());
+            apply_delivery_settings(&app.state::<AppState>(), &cfg);
             register_shortcuts(app.handle(), &cfg);
 
             let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;

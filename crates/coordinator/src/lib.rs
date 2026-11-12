@@ -6,3 +6,4 @@
 pub mod actor;
 pub mod adapters;
 pub mod config_store;
+pub mod delivery;
