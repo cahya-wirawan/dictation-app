@@ -4,6 +4,7 @@
 //! reducer (work package A1) lands in M1. Nothing here performs I/O.
 
 pub mod chord;
+pub mod session;
 
 use std::fmt;
 
