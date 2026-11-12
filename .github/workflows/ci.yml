@@ -110,6 +110,16 @@ jobs:
       - name: clippy (workspace incl. src-tauri, all features)
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
+      - name: TEMP Windows worker diagnostics
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        run: |
+          for f in target/debug/build/transcription-worker-*/out/build/CMakeCache.txt; do
+            echo "== $f"; grep -E "CMAKE_(C|CXX)_FLAGS(_RELEASE)?:|CMAKE_BUILD_TYPE|GGML_(AVX|AVX2|FMA|F16C|NATIVE|OPENMP)|CMAKE_GENERATOR:" "$f" || true
+          done
+          nproc || true
+          cargo test --release -p transcription-worker --test worker_process jfk -- --nocapture
+
       - name: Worker inference timing first (Windows)
         if: runner.os == 'Windows'
         run: cargo test -p transcription-worker --test worker_process jfk -- --nocapture
