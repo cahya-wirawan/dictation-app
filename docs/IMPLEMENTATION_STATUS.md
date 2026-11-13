@@ -1,6 +1,6 @@
 # Implementation status
 
-Last updated: 13 November 2026 · **M0 partially complete · M1–M7 implemented, native GUI runs and release credentials pending** · Version 0.9.0
+Last updated: 13 November 2026 · **M0 partially complete · M1–M7 implemented, native GUI runs and release credentials pending** · Version 0.10.0
 
 **M0 is not done.** Its exit evidence must come from a macOS Apple Silicon release-like build (docs/07 §2), and no Mac has run this code yet. This round ran on a headless Linux host. *Update, 13 November 2026:* the first real GUI run is a user report from an **Intel** MacBook Pro: automatic paste into Notes worked (see "Universal macOS build"). Apple Silicon GUI evidence is still missing. Everything that can be proven without a display, microphone or macOS is proven below. Everything else is written but marked **unverified**.
 
