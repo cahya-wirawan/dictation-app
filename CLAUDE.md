@@ -44,8 +44,8 @@ DICTATION_MODEL_PATH=$PWD/.models/ggml-base.bin pnpm tauri dev
 
 ## Spec documents
 
-- `docs/01`–`docs/12` are the authoritative individual documents; `README.md` gives the reading order and a summary.
-- `DICTATION_MASTER_SPEC.md` is a single-file concatenation of README + all docs (each section marked `<!-- Source: ... -->`). If you edit a doc, keep the master spec in sync.
+- `docs/01`–`docs/12` are the authoritative individual documents; `docs/00_SPEC_OVERVIEW.md` (the original build-kit README) gives the reading order and a summary. `README.md` is user/developer documentation for the app as built.
+- `DICTATION_MASTER_SPEC.md` is a single-file concatenation of `docs/00_SPEC_OVERVIEW.md` + all docs (each section marked `<!-- Source: ... -->`). If you edit a doc, keep the master spec in sync.
 - `docs/11_AGENT_HANDOFF.md` is written for coding agents: it defines the first task (milestone M0 spike) and the non-negotiable invariants. Read it before starting implementation work.
 - Authority on conflicts: PRD (01) defines behavior; State/Contracts (04) defines ordering and invariants; Platform/Delivery (05) defines delivery safeguards. If they conflict, stop the affected work and write a small ADR (in `docs/09_ADRS_AND_RISKS.md` style) — never silently weaken a safeguard.
 - Numbers in the spec are proposals/targets, not measured results. Schemas and type examples are design contracts, not verified API calls — check real crate/whisper.cpp headers instead of guessing method names from the prose.

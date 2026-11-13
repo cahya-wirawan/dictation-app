@@ -18,7 +18,7 @@ Use **Test microphone** to see the input level. The test turns the microphone of
 
 ## Language and model
 
-- **Settings → Transcription → Language.** *Detect automatically* works for mixed use. Choosing English, German or Indonesian is faster and more accurate for short phrases.
+- **Settings → Models → Language.** *Detect automatically* works for mixed use. Choosing English, German or Indonesian is faster and more accurate for short phrases.
 - **Models.**
   - **Base** (148 MB) is the default.
   - **Small** (488 MB) is more accurate but slower.
@@ -69,7 +69,7 @@ Open the draft from the menu bar with **Review text…**. From there you can edi
 | "Paste sent" but no text appeared | The app sent ⌘V once, but it cannot see whether the other app accepted it. Check the target app first. The text is still on the clipboard, so press ⌘V yourself. The app never resends automatically. |
 | Transcription seems stuck | Press cancel. The speech engine is stopped and restarted, and the app is ready again in a moment. |
 | "Clipboard busy" | Another app held the clipboard. Your text is kept as a draft; use **Copy** again. |
-| "Model needs attention" | The model file changed or is damaged. Under **Settings → Transcription**, choose **Verify**, or remove and reinstall the model. |
+| "Model needs attention" | The model file changed or is damaged. Under **Settings → Models**, choose **Verify**, or remove and reinstall the model. |
 | Nothing happens on the shortcut | Check the menu bar tooltip. If it says *Setup needed*, finish setup. Otherwise check for a shortcut conflict. |
 | Text appears in the wrong language | Set the language explicitly. Auto-detection on very short phrases is unreliable. |
 
