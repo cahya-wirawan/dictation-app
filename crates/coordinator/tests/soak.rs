@@ -322,6 +322,7 @@ fn soak_500_mixed_sessions() {
             custom_input_device: false,
             excluded_app_count: 0,
             show_hud: true,
+            continuous: false,
         },
     });
     let json = serde_json::to_string_pretty(&report).unwrap();

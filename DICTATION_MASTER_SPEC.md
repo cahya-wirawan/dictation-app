@@ -475,6 +475,8 @@ Hard cancellation: invalidate the job, close pipes and kill the worker process; 
 
 This is an application schema example, not a Tauri configuration snippet. OS adapters map normalized chords to actual key representations. `device_id: null` means select/confirm the system default during setup; once selected, persist best-effort device identity and require reselection when missing. No target token, transcript, PCM, clipboard snapshot or permissions grant is persisted. Read OS permission state rather than trusting a saved grant.
 
+*Implemented schema (v3):* v2 added `ui.onboarding_complete` and `ui.reduced_motion`; v3 added `audio.continuous` (ADR-014, default `false`). Older files are migrated forward one version at a time.
+
 Write config to a private temporary sibling and atomically replace after validation. Detect corrupt or future schemas, retain a backup, and offer reset rather than destructive downgrade. Model inventory is separate; transient `.partial` files never count as installed models.
 
 
@@ -870,6 +872,23 @@ Accepted. The macOS release is a universal binary: arm64 + x86_64. Apple Silicon
 - **Inference.** CPU on both slices, as on Apple Silicon. Metal stays off (M1 finding).
 - **Evidence.** CI checks that the app and the nested worker contain both slices, and runs the x86_64 worker slice on the JFK fixture under Rosetta 2. Rosetta proves the code is correct, not how fast it is on Intel. Rosetta translates AVX2 only from macOS 15, so the check needs a macOS 15 or later host. Field report: on a MacBook Pro 2019 (2.6 GHz 6-core i7) with Whisper Base, automatic paste into Notes worked, and the text appeared about 1–2 s after the user stopped speaking. Measured Intel timings and formal qualification are still open.
 - **Cost.** The DMG roughly doubles in size, because the worker and app binaries carry two slices.
+
+## ADR-014 — Continuous dictation (opt-in)
+
+Accepted. Requested by the user after the first field report, where one shortcut press per sentence felt slow. The setting is `audio.continuous` (config schema v3) on the Recording page, and it is off by default. It refines "one session, one paste" (docs/01 §3 step 6, docs/04) for users who opt in. No delivery safeguard is weakened.
+
+- **Behavior.** A continuous session keeps the microphone open after each utterance. Every utterance the endpointer finishes, by silence or by the 120 s per-utterance cap, becomes a *phrase*. Phrases are transcribed and pasted strictly in order. Listening continues meanwhile, so speech during transcription is not lost; a phrase that ends while another is in flight waits in a queue.
+- **Ending.** The session ends when:
+  - the user presses the toggle shortcut again (the phrase in flight and the final utterance still paste);
+  - no speech arrives within the no-speech timeout;
+  - the user cancels, or the computer sleeps or locks;
+  - a phrase cannot be pasted safely.
+- **Delivery.** Each phrase is its own delivery transaction with a fresh generation and its own ledger: target re-validation, released modifiers, clipboard write, recheck, commit, one paste chord. All phrases target the token captured at the start press, which is released only when the session ends. If a phrase hits a changed target, a secure field or an uncertain send, or Review is opened, that phrase becomes a draft and the session ends: the microphone closes and utterances not yet transcribed are discarded. A cancel after commit lets the committed phrase go out (`CancelTooLate`) and nothing after it.
+- **Requires automatic paste.** With copy-only, or a target that does not allow automatic paste, the setting is ignored and the session behaves as before: one utterance, then a draft.
+- **Microphone.** "No idle capture" still holds. The microphone is open only while a session is active, and the HUD shows it. The DSP guarantee "microphone closed before the terminal event" now covers the capture's terminal event only. Per-utterance `Segment` events are reported while it is open, and inference runs while it is open.
+- **Not streaming.** ADR-003 stands: each phrase is finalized before it is pasted, and no partial text is inserted or revised.
+- **Risk.** While the mode is on, speech not meant as dictation, such as a conversation or a call, gets pasted. Mitigations: opt-in, the HUD is visible while listening, the shortcut stops it, and it stops by itself after the no-speech timeout.
+- **Evidence.** Reducer fixtures and the fuzz test check that each phrase dispatches at most once, that every transcription has accepted speech, and that no utterance is transcribed twice. DSP segment tests and actor tests with a scripted platform cover the rest. Not yet verified on a real desktop.
 
 ## Risk register
 

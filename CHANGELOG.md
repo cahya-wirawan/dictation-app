@@ -17,6 +17,14 @@ All notable changes to Local Dictation are documented here. The format follows [
 
 ## [Unreleased]
 
+### Added
+
+- **Continuous dictation** (Settings → Recording, off by default). The app keeps listening after each phrase and pastes every phrase into the same text field as soon as you pause, without another shortcut press. Press the shortcut again to stop; it also stops after the no-speech timeout. If you switch to another field or app, that phrase is kept as a draft and listening stops. Requires automatic paste. See ADR-014.
+
+### Changed
+
+- Settings file schema 3 (adds `audio.continuous`). Existing settings are migrated automatically; an older app version will not open the newer file and offers a reset instead.
+
 ## [0.9.0] - 2026-11-13
 
 ### Added

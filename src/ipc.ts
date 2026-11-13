@@ -74,9 +74,9 @@ export interface DraftView {
 }
 
 export interface Config {
-  schema_version: 2;
+  schema_version: 3;
   revision: number;
-  audio: { device_id: string | null; silence_ms: number; no_speech_timeout_ms: number; max_capture_ms: number };
+  audio: { device_id: string | null; silence_ms: number; no_speech_timeout_ms: number; max_capture_ms: number; continuous: boolean };
   transcription: { model_id: string; language: string; backend: "auto" | "cpu" | "metal" };
   delivery: { mode: "auto_paste" | "copy_only"; clipboard_policy: "leave_text" | "preserve"; excluded_apps: string[] };
   shortcuts: { toggle: string; cancel: string; paste_draft: string | null };

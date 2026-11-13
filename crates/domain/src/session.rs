@@ -11,6 +11,16 @@
 //! `DeliveryPrepared` processed while the session is still eligible crosses
 //! the ledger into `Committed` and emits the single `DispatchPaste`. Cancel is
 //! serialized with that commit because both go through this reducer.
+//!
+//! Continuous dictation (ADR-014): a session started with `continuous` keeps
+//! its microphone open and turns every finished utterance (a capture
+//! *segment*) into its own phrase with a fresh generation. Phrases are
+//! transcribed and pasted strictly in order, each through the same
+//! validate → commit → single dispatch path, into the target captured at the
+//! start press. The ledger crosses commit at most once per phrase. Any draft
+//! (target changed, uncertain send, review opened) ends the session.
+
+use std::collections::VecDeque;
 
 use crate::{Generation, Phase, SessionId, WorkerEpoch};
 
@@ -135,6 +145,8 @@ pub enum Input {
         now_ms: u64,
         ready: Result<(), AppError>,
         auto_delivery: bool,
+        /// Continuous dictation setting; only honored with `auto_delivery`.
+        continuous: bool,
     },
     CaptureOpened {
         id: SessionId,
@@ -150,9 +162,19 @@ pub enum Input {
         id: SessionId,
     },
     /// Endpointer/explicit-stop/cap result; the microphone is already closed.
+    /// `segment` numbers the capture's utterances (audio key for the actor).
     CaptureFinished {
         id: SessionId,
         generation: Generation,
+        segment: u32,
+        outcome: CaptureOutcome,
+    },
+    /// Continuous capture only: one utterance ended, the microphone is still
+    /// open for the next one.
+    CaptureSegment {
+        id: SessionId,
+        generation: Generation,
+        segment: u32,
         outcome: CaptureOutcome,
     },
     TranscriptionDone {
@@ -220,6 +242,8 @@ pub enum Effect {
     OpenCapture {
         id: SessionId,
         generation: Generation,
+        /// Keep listening after each utterance (ADR-014).
+        continuous: bool,
     },
     /// Explicit stop: finalize with the audio captured so far.
     FinishCapture {
@@ -232,6 +256,8 @@ pub enum Effect {
     },
     StartTranscription {
         job: JobKey,
+        /// Which captured utterance to transcribe.
+        segment: u32,
     },
     /// Hard-cancel the worker (kill + respawn later). Discards the job.
     KillWorker,
@@ -275,6 +301,47 @@ struct Live {
     draft_revision: Option<u32>,
     /// Pending notification once resources close (Recovering).
     closing_outcome: Option<Outcome>,
+    /// Continuous dictation session (ADR-014).
+    continuous: bool,
+    /// Generation of the capture; equals `generation` except in continuous
+    /// sessions, where every phrase after the first gets a new generation.
+    capture_generation: Generation,
+    /// The microphone of this session has not reported a terminal event.
+    capture_open: bool,
+    /// Continuous: no new phrases after the capture closes (stop requested,
+    /// no-speech timeout, capture fault or review opened).
+    finishing: bool,
+    /// Continuous: accepted utterances waiting for their turn, oldest first.
+    queue: VecDeque<u32>,
+    /// Continuous: phrases started / pasted so far.
+    phrases: u32,
+    pasted: u32,
+    /// Continuous: why the session ended, reported if nothing was pasted
+    /// (or always, for a fault).
+    end_outcome: Option<Outcome>,
+}
+
+impl Live {
+    fn new(id: SessionId, generation: Generation, mode: DeliveryMode) -> Self {
+        Self {
+            id,
+            generation,
+            auto_eligible: false,
+            ledger: Ledger::NotAttempted,
+            mode,
+            text: None,
+            draft_revision: None,
+            closing_outcome: None,
+            continuous: false,
+            capture_generation: generation,
+            capture_open: false,
+            finishing: false,
+            queue: VecDeque::new(),
+            phrases: 0,
+            pasted: 0,
+            end_outcome: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -322,6 +389,24 @@ impl Machine {
     pub fn worker_epoch(&self) -> WorkerEpoch {
         self.worker_epoch
     }
+    /// The live session's open capture, as its capture events are fenced.
+    pub fn capture_session(&self) -> Option<(SessionId, Generation)> {
+        self.live
+            .as_ref()
+            .filter(|l| l.capture_open)
+            .map(|l| (l.id, l.capture_generation))
+    }
+    /// True while a continuous dictation session is live.
+    pub fn continuous(&self) -> bool {
+        self.live.as_ref().is_some_and(|l| l.continuous)
+    }
+    /// Whether captured utterance `segment` of session `id` still waits for
+    /// transcription (the coordinator keeps its audio until then).
+    pub fn is_queued(&self, id: SessionId, segment: u32) -> bool {
+        self.live
+            .as_ref()
+            .is_some_and(|l| l.id == id && l.queue.contains(&segment))
+    }
 
     pub fn step(&mut self, input: Input) -> Vec<Effect> {
         let mut fx = Vec::new();
@@ -339,6 +424,13 @@ impl Machine {
             .is_some_and(|l| l.id == id && l.generation == generation)
     }
 
+    /// Capture events are fenced on the capture's generation.
+    fn is_capture(&self, id: SessionId, generation: Generation) -> bool {
+        self.live
+            .as_ref()
+            .is_some_and(|l| l.id == id && l.capture_generation == generation && l.capture_open)
+    }
+
     fn apply(&mut self, input: Input, fx: &mut Vec<Effect>) {
         use Phase::*;
         match input {
@@ -347,6 +439,7 @@ impl Machine {
                 now_ms,
                 ready,
                 auto_delivery,
+                continuous,
             } => {
                 self.now_ms = self.now_ms.max(now_ms);
                 match self.phase {
@@ -357,18 +450,19 @@ impl Machine {
                         }
                         let generation = self.next_generation;
                         self.next_generation += 1;
-                        self.live = Some(Live {
+                        let mut live = Live::new(id, generation, DeliveryMode::Automatic);
+                        live.auto_eligible = auto_delivery;
+                        // Continuous phrases paste on their own; without
+                        // automatic delivery there is nothing to continue.
+                        live.continuous = continuous && auto_delivery;
+                        live.capture_open = true;
+                        self.live = Some(live);
+                        self.phase = Starting;
+                        fx.push(Effect::OpenCapture {
                             id,
                             generation,
-                            auto_eligible: auto_delivery,
-                            ledger: Ledger::NotAttempted,
-                            mode: DeliveryMode::Automatic,
-                            text: None,
-                            draft_revision: None,
-                            closing_outcome: None,
+                            continuous: continuous && auto_delivery,
                         });
-                        self.phase = Starting;
-                        fx.push(Effect::OpenCapture { id, generation });
                     }
                     // Never discard a draft silently (docs/02 §4).
                     DraftReady => {
@@ -379,7 +473,7 @@ impl Machine {
             }
 
             Input::CaptureOpened { id, generation } => {
-                if self.phase == Starting && self.is_live(id, generation) {
+                if self.phase == Starting && self.is_capture(id, generation) {
                     self.phase = Listening;
                 }
             }
@@ -389,31 +483,110 @@ impl Machine {
                 generation,
                 error,
             } => {
-                if matches!(self.phase, Starting | Listening | Finalizing)
-                    && self.is_live(id, generation)
-                {
+                if !self.is_capture(id, generation) {
+                    return;
+                }
+                if matches!(self.phase, Starting | Listening | Finalizing) {
                     self.begin_recovery(Outcome::Failed(error), fx);
+                } else if matches!(self.phase, Transcribing | Delivering)
+                    && let Some(l) = self.live.as_mut().filter(|l| l.continuous)
+                {
+                    // The phrase in flight (and any queued) still completes;
+                    // the fault is reported when the session ends.
+                    l.capture_open = false;
+                    l.finishing = true;
+                    l.end_outcome = Some(Outcome::Failed(error));
                 }
             }
 
             Input::Stop { id } => {
+                let phase = self.phase;
+                let Some(l) = self.live.as_mut().filter(|l| l.id == id) else {
+                    return;
+                };
                 // First finish request wins; later ones are no-ops.
-                if self.phase == Listening
-                    && let Some(l) = self.live.as_ref().filter(|l| l.id == id)
-                {
-                    let generation = l.generation;
+                if phase == Listening {
+                    l.finishing = true;
+                    let generation = l.capture_generation;
                     self.phase = Finalizing;
                     fx.push(Effect::FinishCapture { id, generation });
+                } else if matches!(phase, Transcribing | Delivering) {
+                    if !l.continuous {
+                        fx.push(Effect::Notify(Outcome::Rejected(AppError::Busy)));
+                    } else if l.capture_open && !l.finishing {
+                        // Continuous: finish the capture; the phrase in
+                        // flight and the final utterance still paste.
+                        l.finishing = true;
+                        fx.push(Effect::FinishCapture {
+                            id,
+                            generation: l.capture_generation,
+                        });
+                    }
+                }
+            }
+
+            Input::CaptureSegment {
+                id,
+                generation,
+                segment,
+                outcome,
+            } => {
+                if !matches!(
+                    self.phase,
+                    Listening | Finalizing | Transcribing | Delivering
+                ) || !self.is_capture(id, generation)
+                {
+                    return;
+                }
+                let Some(l) = self.live.as_mut().filter(|l| l.continuous) else {
+                    return;
+                };
+                if outcome == CaptureOutcome::Speech {
+                    l.queue.push_back(segment);
+                    if matches!(self.phase, Listening | Finalizing) {
+                        self.start_next(fx);
+                    }
                 }
             }
 
             Input::CaptureFinished {
                 id,
                 generation,
+                segment,
                 outcome,
             } => {
-                if !matches!(self.phase, Listening | Finalizing) || !self.is_live(id, generation) {
+                if !self.is_capture(id, generation) {
                     return;
+                }
+                if self.continuous() {
+                    if !matches!(
+                        self.phase,
+                        Listening | Finalizing | Transcribing | Delivering
+                    ) {
+                        return;
+                    }
+                    let Some(l) = self.live.as_mut() else { return };
+                    l.capture_open = false;
+                    l.finishing = true;
+                    match outcome {
+                        CaptureOutcome::Speech => l.queue.push_back(segment),
+                        CaptureOutcome::NoSpeech => {
+                            l.end_outcome.get_or_insert(Outcome::NoSpeech);
+                        }
+                        CaptureOutcome::TooShort => {
+                            l.end_outcome.get_or_insert(Outcome::NoUsableText);
+                        }
+                    }
+                    if matches!(self.phase, Listening | Finalizing) {
+                        self.start_next(fx);
+                    }
+                    return;
+                }
+                if !matches!(self.phase, Listening | Finalizing) {
+                    return;
+                }
+                if let Some(l) = self.live.as_mut() {
+                    l.capture_open = false;
                 }
                 match outcome {
                     CaptureOutcome::Speech => {
@@ -423,7 +596,7 @@ impl Machine {
                             generation,
                             worker_epoch: self.worker_epoch,
                         };
-                        fx.push(Effect::StartTranscription { job });
+                        fx.push(Effect::StartTranscription { job, segment });
                     }
                     // Invariant 7: no speech → no inference, clipboard or input.
                     CaptureOutcome::NoSpeech => self.finish_clean(Outcome::NoSpeech, fx),
@@ -435,10 +608,17 @@ impl Machine {
                 if self.phase != Transcribing || !self.job_matches(job) {
                     return;
                 }
-                fx.push(Effect::DropAudio { id: job.session });
+                let continuous = self.continuous();
+                if !continuous {
+                    fx.push(Effect::DropAudio { id: job.session });
+                }
                 let text = text.trim().to_owned();
                 if text.is_empty() {
-                    self.finish_clean(Outcome::NoUsableText, fx);
+                    if continuous {
+                        self.start_next(fx); // a cough or noise: keep listening
+                    } else {
+                        self.finish_clean(Outcome::NoUsableText, fx);
+                    }
                     return;
                 }
                 let Some(l) = self.live.as_mut() else { return };
@@ -518,6 +698,30 @@ impl Machine {
                 if l.ledger != Ledger::Committed {
                     return;
                 }
+                if l.continuous {
+                    match result {
+                        DispatchResult::Sent => {
+                            l.ledger = Ledger::Sent;
+                            l.text = None;
+                            if l.closing_outcome == Some(Outcome::CancelTooLate) {
+                                // Canceled after commit: this phrase went out,
+                                // nothing after it may.
+                                self.begin_recovery(Outcome::CancelTooLate, fx);
+                            } else {
+                                l.pasted += 1;
+                                fx.push(Effect::Notify(Outcome::PasteSent));
+                                self.start_next(fx);
+                            }
+                        }
+                        DispatchResult::Uncertain => {
+                            l.ledger = Ledger::Uncertain;
+                            let text = l.text.take().unwrap_or_default();
+                            fx.push(Effect::ReleaseTarget { id });
+                            self.enter_draft(text, DraftReason::Uncertain, true, fx);
+                        }
+                    }
+                    return;
+                }
                 fx.push(Effect::ReleaseTarget { id });
                 match result {
                     DispatchResult::Sent => {
@@ -585,11 +789,30 @@ impl Machine {
 
             Input::ReviewOpened => {
                 // Invariant 9: opening Review revokes automatic delivery.
+                let phases_ok = if self.continuous() {
+                    matches!(
+                        self.phase,
+                        Starting | Listening | Finalizing | Transcribing | Delivering
+                    )
+                } else {
+                    matches!(self.phase, Starting | Listening | Finalizing | Transcribing)
+                };
                 if let Some(l) = self.live.as_mut()
-                    && matches!(self.phase, Starting | Listening | Finalizing | Transcribing)
+                    && phases_ok
                 {
                     l.auto_eligible = false;
-                    l.closing_outcome = Some(Outcome::DraftReady(DraftReason::ReviewOpened));
+                    if l.closing_outcome.is_none() {
+                        l.closing_outcome = Some(Outcome::DraftReady(DraftReason::ReviewOpened));
+                    }
+                    // Continuous: the next phrase becomes the draft and ends
+                    // the session, so stop listening after it.
+                    if l.continuous && l.capture_open && !l.finishing {
+                        l.finishing = true;
+                        fx.push(Effect::FinishCapture {
+                            id: l.id,
+                            generation: l.capture_generation,
+                        });
+                    }
                 }
             }
 
@@ -668,16 +891,10 @@ impl Machine {
                 let generation = self.next_generation;
                 self.next_generation += 1;
                 let text = d.text.clone();
-                self.live = Some(Live {
-                    id,
-                    generation,
-                    auto_eligible: false,
-                    ledger: Ledger::NotAttempted,
-                    mode: DeliveryMode::Explicit,
-                    text: Some(text.clone()),
-                    draft_revision: Some(revision),
-                    closing_outcome: None,
-                });
+                let mut live = Live::new(id, generation, DeliveryMode::Explicit);
+                live.text = Some(text.clone());
+                live.draft_revision = Some(revision);
+                self.live = Some(live);
                 self.phase = Delivering;
                 fx.push(Effect::PrepareDelivery {
                     id,
@@ -741,6 +958,48 @@ impl Machine {
         job.worker_epoch == self.worker_epoch && self.is_live(job.session, job.generation)
     }
 
+    /// Continuous: start the next queued phrase, keep listening, or end the
+    /// session once the capture is closed and nothing is left.
+    fn start_next(&mut self, fx: &mut Vec<Effect>) {
+        let Some(l) = self.live.as_mut() else { return };
+        if let Some(segment) = l.queue.pop_front() {
+            if l.phrases > 0 {
+                l.generation = self.next_generation;
+                self.next_generation += 1;
+            }
+            l.phrases += 1;
+            l.ledger = Ledger::NotAttempted;
+            l.text = None;
+            let job = JobKey {
+                session: l.id,
+                generation: l.generation,
+                worker_epoch: self.worker_epoch,
+            };
+            self.phase = Phase::Transcribing;
+            fx.push(Effect::StartTranscription { job, segment });
+        } else if l.capture_open {
+            self.phase = if l.finishing {
+                Phase::Finalizing
+            } else {
+                Phase::Listening
+            };
+        } else {
+            let outcome = match l.end_outcome {
+                Some(Outcome::Failed(e)) => Some(Outcome::Failed(e)),
+                _ if l.pasted > 0 => None,
+                other => Some(other.unwrap_or(Outcome::NoUsableText)),
+            };
+            let id = l.id;
+            self.live = None;
+            self.phase = Phase::Idle;
+            fx.push(Effect::DropAudio { id });
+            fx.push(Effect::ReleaseTarget { id });
+            if let Some(o) = outcome {
+                fx.push(Effect::Notify(o));
+            }
+        }
+    }
+
     /// Clean terminal outcome with nothing left to close.
     fn finish_clean(&mut self, outcome: Outcome, fx: &mut Vec<Effect>) {
         if let Some(l) = self.live.take() {
@@ -756,6 +1015,7 @@ impl Machine {
         let Some(l) = self.live.as_mut() else { return };
         l.auto_eligible = false;
         l.text = None;
+        l.queue.clear();
         l.closing_outcome = Some(outcome);
         let id = l.id;
         self.phase = Phase::Recovering;
@@ -783,6 +1043,14 @@ impl Machine {
         fx: &mut Vec<Effect>,
     ) {
         let Some(l) = self.live.take() else { return };
+        if l.continuous {
+            // A draft ends a continuous session: stop listening and forget
+            // utterances that were not transcribed yet.
+            if l.capture_open {
+                fx.push(Effect::AbortCapture { id: l.id });
+            }
+            fx.push(Effect::DropAudio { id: l.id });
+        }
         let created_ms = self.draft.as_ref().map_or(self.now_ms, |d| d.created_ms);
         let prior_attempted = self.draft.as_ref().is_some_and(|d| d.attempted);
         self.draft = Some(Draft {

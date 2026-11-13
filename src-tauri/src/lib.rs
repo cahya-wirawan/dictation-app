@@ -654,6 +654,9 @@ fn apply_delivery_settings(state: &AppState, cfg: &Config) {
     state.handle.send(Command::SetAutoDelivery(
         cfg.delivery.mode == DeliveryModeSetting::AutoPaste,
     ));
+    state
+        .handle
+        .send(Command::SetContinuous(cfg.audio.continuous));
     if let Ok(mut e) = state.excluded.lock() {
         e.clone_from(&cfg.delivery.excluded_apps);
     }

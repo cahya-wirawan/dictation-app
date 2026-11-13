@@ -18,6 +18,7 @@ fn start(m: &mut Machine, n: u8) -> Vec<Effect> {
         now_ms: 1_000,
         ready: Ok(()),
         auto_delivery: true,
+        continuous: false,
     })
 }
 
@@ -29,13 +30,14 @@ fn to_transcribing(m: &mut Machine, n: u8) -> JobKey {
     let fx = m.step(Input::CaptureFinished {
         id,
         generation,
+        segment: 0,
         outcome: CaptureOutcome::Speech,
     });
     match fx
         .iter()
         .find(|e| matches!(e, Effect::StartTranscription { .. }))
     {
-        Some(Effect::StartTranscription { job }) => *job,
+        Some(Effect::StartTranscription { job, .. }) => *job,
         _ => panic!("no StartTranscription in {fx:?}"),
     }
 }
@@ -118,6 +120,7 @@ fn start_rejections_do_not_change_state() {
         now_ms: 0,
         ready: Err(AppError::ModelUnavailable),
         auto_delivery: true,
+        continuous: false,
     });
     assert_eq!(m.phase(), Phase::Idle);
     assert_eq!(
@@ -168,11 +171,13 @@ fn stop_and_endpoint_race_yields_one_job() {
     let c = m.step(Input::CaptureFinished {
         id,
         generation,
+        segment: 0,
         outcome: CaptureOutcome::Speech,
     });
     let d = m.step(Input::CaptureFinished {
         id,
         generation,
+        segment: 0,
         outcome: CaptureOutcome::Speech,
     });
     let jobs = c
@@ -193,6 +198,7 @@ fn no_speech_never_reaches_inference_clipboard_or_input() {
         let fx = m.step(Input::CaptureFinished {
             id,
             generation,
+            segment: 0,
             outcome,
         });
         assert!(!has(&fx, |e| matches!(
@@ -433,12 +439,14 @@ fn copy_only_readiness_goes_to_draft() {
         now_ms: 0,
         ready: Ok(()),
         auto_delivery: false,
+        continuous: false,
     });
     let (id, generation) = m.live_session().unwrap();
     m.step(Input::CaptureOpened { id, generation });
     m.step(Input::CaptureFinished {
         id,
         generation,
+        segment: 0,
         outcome: CaptureOutcome::Speech,
     });
     let fx = m.step(Input::TranscriptionDone {
@@ -679,6 +687,7 @@ fn fuzz_invariants_hold() {
     };
     let mut total_dispatch = 0;
     let mut total_precommit_cancels = 0;
+    let mut chained_phrases = 0;
     for _run in 0..400 {
         let mut m = Machine::new(0);
         let mut epoch = 0u64;
@@ -686,7 +695,9 @@ fn fuzz_invariants_hold() {
         let mut dispatched: HashMap<(SessionId, u64), u32> = HashMap::new();
         let mut canceled_precommit: HashSet<(SessionId, u64)> = HashSet::new();
         let mut speech_finished: HashSet<(SessionId, u64)> = HashSet::new();
-        for _ in 0..60 {
+        let mut accepted: HashSet<(SessionId, u32)> = HashSet::new();
+        let mut transcribed: HashSet<(SessionId, u32)> = HashSet::new();
+        for seg in 0..60u32 {
             let live = m.live_session();
             // Mostly target the live session, sometimes a stale/foreign one.
             let (id, generation) = match (live, next(5)) {
@@ -697,6 +708,13 @@ fn fuzz_invariants_hold() {
                 session: id,
                 generation,
                 worker_epoch: if next(4) == 0 { epoch + 1 } else { epoch },
+            };
+            // Capture events are fenced on the capture generation, which a
+            // continuous session keeps while its phrases get new ones.
+            let (cid, cgen) = if live == Some((id, generation)) {
+                m.capture_session().unwrap_or((id, generation))
+            } else {
+                (id, generation)
             };
             let rev = m.draft().map_or(0, |d| d.revision);
             let draft_id = m.draft().map_or(id, |d| d.id);
@@ -710,23 +728,47 @@ fn fuzz_invariants_hold() {
                         now_ms: now,
                         ready: Ok(()),
                         auto_delivery: next(4) != 0,
+                        continuous: next(2) == 0,
                     }),
-                    (Phase::Starting, Some((id, generation))) => {
-                        Some(Input::CaptureOpened { id, generation })
-                    }
-                    (Phase::Listening | Phase::Finalizing, Some((id, generation))) => {
+                    (Phase::Starting, Some(_)) => Some(Input::CaptureOpened {
+                        id: cid,
+                        generation: cgen,
+                    }),
+                    (Phase::Listening | Phase::Finalizing, Some((id, _))) => {
                         Some(if next(3) == 0 {
                             Input::Stop { id }
+                        } else if m.continuous() && next(4) != 0 {
+                            Input::CaptureSegment {
+                                id: cid,
+                                generation: cgen,
+                                segment: seg,
+                                outcome: if next(5) == 0 {
+                                    CaptureOutcome::TooShort
+                                } else {
+                                    CaptureOutcome::Speech
+                                },
+                            }
                         } else {
                             Input::CaptureFinished {
-                                id,
-                                generation,
+                                id: cid,
+                                generation: cgen,
+                                segment: seg,
                                 outcome: if next(5) == 0 {
                                     CaptureOutcome::NoSpeech
                                 } else {
                                     CaptureOutcome::Speech
                                 },
                             }
+                        })
+                    }
+                    (Phase::Transcribing | Phase::Delivering, Some(_))
+                        if m.capture_session().is_some() && next(3) == 0 =>
+                    {
+                        Some(Input::CaptureSegment {
+                            id: cid,
+                            generation: cgen,
+                            segment: seg,
+                            outcome: CaptureOutcome::Speech,
                         })
                     }
                     (Phase::Transcribing, Some((id, generation))) => {
@@ -779,7 +821,7 @@ fn fuzz_invariants_hold() {
             let input = if let Some(i) = advance {
                 i
             } else {
-                match next(20) {
+                match next(22) {
                     0 | 1 => Input::Start {
                         id: sid(next(4) as u8),
                         now_ms: now,
@@ -789,17 +831,22 @@ fn fuzz_invariants_hold() {
                             Ok(())
                         },
                         auto_delivery: next(4) != 0,
+                        continuous: next(2) == 0,
                     },
-                    2 => Input::CaptureOpened { id, generation },
+                    2 => Input::CaptureOpened {
+                        id: cid,
+                        generation: cgen,
+                    },
                     3 => Input::CaptureFailed {
-                        id,
-                        generation,
+                        id: cid,
+                        generation: cgen,
                         error: AppError::MicDisconnected,
                     },
                     4 => Input::Stop { id },
                     5 => Input::CaptureFinished {
-                        id,
-                        generation,
+                        id: cid,
+                        generation: cgen,
+                        segment: seg,
                         outcome: [
                             CaptureOutcome::Speech,
                             CaptureOutcome::NoSpeech,
@@ -853,6 +900,13 @@ fn fuzz_invariants_hold() {
                     },
                     17 => Input::DraftDiscard { id: draft_id },
                     18 => Input::Suspend,
+                    19 | 20 => Input::CaptureSegment {
+                        id: cid,
+                        generation: cgen,
+                        segment: seg,
+                        outcome: [CaptureOutcome::Speech, CaptureOutcome::TooShort]
+                            [next(2) as usize],
+                    },
                     _ => Input::Tick { now_ms: now },
                 }
             };
@@ -860,13 +914,25 @@ fn fuzz_invariants_hold() {
             let ledger_before = m.ledger();
             let live_before = m.live_session();
             let is_cancel = matches!(input, Input::Cancel | Input::Suspend);
-            let speech = matches!(
+            let chains = matches!(
                 input,
-                Input::CaptureFinished {
-                    outcome: CaptureOutcome::Speech,
-                    ..
-                }
+                Input::TranscriptionDone { .. } | Input::DispatchFinished { .. }
             );
+            if let Input::CaptureFinished {
+                id,
+                segment,
+                outcome: CaptureOutcome::Speech,
+                ..
+            }
+            | Input::CaptureSegment {
+                id,
+                segment,
+                outcome: CaptureOutcome::Speech,
+                ..
+            } = input
+            {
+                accepted.insert((id, segment));
+            }
             let fx = m.step(input);
 
             if is_cancel
@@ -890,9 +956,22 @@ fn fuzz_invariants_hold() {
                         );
                         assert_eq!(phase_before, Phase::Delivering);
                     }
-                    Effect::StartTranscription { job } => {
-                        assert!(speech, "inference without accepted speech");
-                        speech_finished.insert((job.session, job.generation));
+                    Effect::StartTranscription { job, segment } => {
+                        assert!(
+                            accepted.contains(&(job.session, *segment)),
+                            "inference without accepted speech"
+                        );
+                        assert!(
+                            transcribed.insert((job.session, *segment)),
+                            "one utterance transcribed twice"
+                        );
+                        assert!(
+                            speech_finished.insert((job.session, job.generation)),
+                            "two phrases share a generation"
+                        );
+                        if chains {
+                            chained_phrases += 1;
+                        }
                     }
                     Effect::OpenCapture { .. } => {
                         assert_eq!(phase_before, Phase::Idle, "capture opened while busy")
@@ -942,7 +1021,14 @@ fn fuzz_invariants_hold() {
             }
         }
     }
-    eprintln!("fuzz: {total_dispatch} dispatches, {total_precommit_cancels} pre-commit cancels");
+    eprintln!(
+        "fuzz: {total_dispatch} dispatches, {total_precommit_cancels} pre-commit cancels, \
+         {chained_phrases} continuous follow-up phrases"
+    );
+    assert!(
+        chained_phrases > 50,
+        "fuzz should exercise continuous sessions; got {chained_phrases}"
+    );
     assert!(
         total_dispatch > 500,
         "fuzz should exercise dispatch; got {total_dispatch}"
@@ -951,4 +1037,338 @@ fn fuzz_invariants_hold() {
         total_precommit_cancels > 20,
         "fuzz should exercise pre-commit cancel; got {total_precommit_cancels}"
     );
+}
+
+// ---- Continuous dictation (ADR-014) ----
+
+fn start_continuous(m: &mut Machine, n: u8) -> (SessionId, u64) {
+    let fx = m.step(Input::Start {
+        id: sid(n),
+        now_ms: 1_000,
+        ready: Ok(()),
+        auto_delivery: true,
+        continuous: true,
+    });
+    assert!(has(&fx, |e| matches!(
+        e,
+        Effect::OpenCapture {
+            continuous: true,
+            ..
+        }
+    )));
+    let (id, generation) = m.live_session().unwrap();
+    m.step(Input::CaptureOpened { id, generation });
+    assert_eq!(m.phase(), Phase::Listening);
+    assert!(m.continuous());
+    (id, generation)
+}
+
+fn segment(m: &mut Machine, (id, generation): (SessionId, u64), segment: u32) -> Vec<Effect> {
+    m.step(Input::CaptureSegment {
+        id,
+        generation,
+        segment,
+        outcome: CaptureOutcome::Speech,
+    })
+}
+
+fn job_of(fx: &[Effect]) -> Option<(JobKey, u32)> {
+    fx.iter().find_map(|e| match e {
+        Effect::StartTranscription { job, segment } => Some((*job, *segment)),
+        _ => None,
+    })
+}
+
+/// Transcribe → prepare → dispatch one phrase; returns the dispatch effects.
+fn deliver(m: &mut Machine, job: JobKey) -> Vec<Effect> {
+    let fx = m.step(Input::TranscriptionDone {
+        job,
+        text: "phrase".into(),
+    });
+    assert!(has(&fx, |e| matches!(e, Effect::PrepareDelivery { .. })));
+    let fx = m.step(Input::DeliveryPrepared {
+        id: job.session,
+        generation: job.generation,
+        result: Ok(()),
+    });
+    assert!(has(&fx, |e| matches!(e, Effect::DispatchPaste { .. })));
+    m.step(Input::DispatchFinished {
+        id: job.session,
+        generation: job.generation,
+        result: DispatchResult::Sent,
+    })
+}
+
+#[test]
+fn continuous_pastes_each_phrase_in_order_and_keeps_listening() {
+    let mut m = Machine::new(0);
+    let cap = start_continuous(&mut m, 1);
+
+    let (job1, s1) = job_of(&segment(&mut m, cap, 0)).unwrap();
+    assert_eq!(
+        (s1, job1.generation),
+        (0, cap.1),
+        "first phrase uses the capture generation"
+    );
+    assert_eq!(m.phase(), Phase::Transcribing);
+    assert_eq!(m.capture_session(), Some(cap), "microphone stays open");
+
+    // The next utterance ends while the first is still transcribing: queued.
+    let fx = segment(&mut m, cap, 1);
+    assert!(job_of(&fx).is_none());
+    assert!(m.is_queued(cap.0, 1));
+
+    let fx = deliver(&mut m, job1);
+    assert_eq!(notified(&fx), Some(Outcome::PasteSent));
+    assert!(
+        !has(&fx, |e| matches!(e, Effect::ReleaseTarget { .. })),
+        "the target token is kept for the next phrase"
+    );
+    let (job2, s2) = job_of(&fx).expect("queued phrase starts right after the paste");
+    assert_eq!(s2, 1);
+    assert!(
+        job2.generation > job1.generation,
+        "every phrase is its own transaction"
+    );
+    assert_eq!(m.ledger(), Some(Ledger::NotAttempted));
+
+    // A late duplicate for phrase 1 is stale.
+    assert!(
+        m.step(Input::DispatchFinished {
+            id: job1.session,
+            generation: job1.generation,
+            result: DispatchResult::Sent,
+        })
+        .is_empty()
+    );
+
+    let fx = deliver(&mut m, job2);
+    assert_eq!(notified(&fx), Some(Outcome::PasteSent));
+    assert_eq!(m.phase(), Phase::Listening);
+
+    // Toggle: finish the capture; the trailing silence ends the session.
+    let fx = m.step(Input::Stop { id: cap.0 });
+    assert!(has(&fx, |e| *e
+        == Effect::FinishCapture {
+            id: cap.0,
+            generation: cap.1
+        }));
+    assert_eq!(m.phase(), Phase::Finalizing);
+    let fx = m.step(Input::CaptureFinished {
+        id: cap.0,
+        generation: cap.1,
+        segment: 2,
+        outcome: CaptureOutcome::NoSpeech,
+    });
+    assert_eq!(m.phase(), Phase::Idle);
+    assert!(has(&fx, |e| *e == Effect::ReleaseTarget { id: cap.0 }));
+    assert_eq!(
+        notified(&fx),
+        None,
+        "phrases were pasted: no 'no speech' banner"
+    );
+}
+
+#[test]
+fn continuous_no_speech_timeout_without_any_phrase_reports_no_speech() {
+    let mut m = Machine::new(0);
+    let cap = start_continuous(&mut m, 1);
+    let fx = m.step(Input::CaptureFinished {
+        id: cap.0,
+        generation: cap.1,
+        segment: 0,
+        outcome: CaptureOutcome::NoSpeech,
+    });
+    assert_eq!(m.phase(), Phase::Idle);
+    assert_eq!(notified(&fx), Some(Outcome::NoSpeech));
+}
+
+#[test]
+fn continuous_stop_while_transcribing_still_pastes_the_final_utterance() {
+    let mut m = Machine::new(0);
+    let cap = start_continuous(&mut m, 1);
+    let (job1, _) = job_of(&segment(&mut m, cap, 0)).unwrap();
+
+    let fx = m.step(Input::Stop { id: cap.0 });
+    assert!(has(&fx, |e| matches!(e, Effect::FinishCapture { .. })));
+    assert_eq!(
+        m.phase(),
+        Phase::Transcribing,
+        "the phrase in flight continues"
+    );
+    assert!(
+        m.step(Input::Stop { id: cap.0 }).is_empty(),
+        "second stop is a no-op"
+    );
+
+    // The final utterance arrives with the terminal capture event.
+    m.step(Input::CaptureFinished {
+        id: cap.0,
+        generation: cap.1,
+        segment: 1,
+        outcome: CaptureOutcome::Speech,
+    });
+    let fx = deliver(&mut m, job1);
+    let (job2, s2) = job_of(&fx).unwrap();
+    assert_eq!(s2, 1);
+    let fx = deliver(&mut m, job2);
+    assert_eq!(m.phase(), Phase::Idle);
+    assert!(has(&fx, |e| *e == Effect::ReleaseTarget { id: cap.0 }));
+}
+
+#[test]
+fn continuous_noise_is_skipped_and_listening_continues() {
+    let mut m = Machine::new(0);
+    let cap = start_continuous(&mut m, 1);
+    let tooshort = m.step(Input::CaptureSegment {
+        id: cap.0,
+        generation: cap.1,
+        segment: 0,
+        outcome: CaptureOutcome::TooShort,
+    });
+    assert!(job_of(&tooshort).is_none());
+    assert_eq!(m.phase(), Phase::Listening);
+
+    let (job, _) = job_of(&segment(&mut m, cap, 1)).unwrap();
+    let fx = m.step(Input::TranscriptionDone {
+        job,
+        text: "   ".into(),
+    });
+    assert_eq!(m.phase(), Phase::Listening);
+    assert_eq!(notified(&fx), None);
+}
+
+#[test]
+fn continuous_target_change_ends_the_session_with_a_draft() {
+    let mut m = Machine::new(0);
+    let cap = start_continuous(&mut m, 1);
+    let (job, _) = job_of(&segment(&mut m, cap, 0)).unwrap();
+    segment(&mut m, cap, 1); // queued, never transcribed
+    m.step(Input::TranscriptionDone {
+        job,
+        text: "phrase".into(),
+    });
+    let fx = m.step(Input::DeliveryPrepared {
+        id: cap.0,
+        generation: job.generation,
+        result: Err(AppError::TargetChanged),
+    });
+    assert_eq!(m.phase(), Phase::DraftReady);
+    assert_eq!(m.draft().unwrap().text, "phrase");
+    assert!(
+        has(&fx, |e| *e == Effect::AbortCapture { id: cap.0 }),
+        "microphone closes"
+    );
+    assert!(
+        has(&fx, |e| *e == Effect::DropAudio { id: cap.0 }),
+        "queued audio is dropped"
+    );
+    assert!(!has(&fx, |e| matches!(e, Effect::DispatchPaste { .. })));
+    assert!(!m.is_queued(cap.0, 1));
+}
+
+#[test]
+fn continuous_cancel_after_commit_stops_everything_after_that_phrase() {
+    let mut m = Machine::new(0);
+    let cap = start_continuous(&mut m, 1);
+    let (job, _) = job_of(&segment(&mut m, cap, 0)).unwrap();
+    segment(&mut m, cap, 1);
+    m.step(Input::TranscriptionDone {
+        job,
+        text: "phrase".into(),
+    });
+    m.step(Input::DeliveryPrepared {
+        id: cap.0,
+        generation: job.generation,
+        result: Ok(()),
+    });
+    assert!(
+        m.step(Input::Cancel).is_empty(),
+        "the committed send cannot be retracted"
+    );
+    let fx = m.step(Input::DispatchFinished {
+        id: cap.0,
+        generation: job.generation,
+        result: DispatchResult::Sent,
+    });
+    assert_eq!(m.phase(), Phase::Recovering);
+    assert!(job_of(&fx).is_none(), "no phrase after a cancel");
+    assert!(has(&fx, |e| *e == Effect::AbortCapture { id: cap.0 }));
+    let fx = m.step(Input::ResourcesClosed { id: cap.0 });
+    assert_eq!(notified(&fx), Some(Outcome::CancelTooLate));
+}
+
+#[test]
+fn continuous_capture_fault_lets_the_phrase_finish_then_reports() {
+    let mut m = Machine::new(0);
+    let cap = start_continuous(&mut m, 1);
+    let (job, _) = job_of(&segment(&mut m, cap, 0)).unwrap();
+    m.step(Input::CaptureFailed {
+        id: cap.0,
+        generation: cap.1,
+        error: AppError::MicDisconnected,
+    });
+    assert_eq!(m.phase(), Phase::Transcribing);
+    let fx = deliver(&mut m, job);
+    assert!(has(&fx, |e| *e == Effect::Notify(Outcome::PasteSent)));
+    assert_eq!(m.phase(), Phase::Idle);
+    assert_eq!(
+        fx.iter()
+            .filter_map(|e| match e {
+                Effect::Notify(o) => Some(*o),
+                _ => None,
+            })
+            .next_back(),
+        Some(Outcome::Failed(AppError::MicDisconnected))
+    );
+}
+
+#[test]
+fn continuous_review_opened_turns_the_next_phrase_into_a_draft() {
+    let mut m = Machine::new(0);
+    let cap = start_continuous(&mut m, 1);
+    let fx = m.step(Input::ReviewOpened);
+    assert!(has(&fx, |e| matches!(e, Effect::FinishCapture { .. })));
+    m.step(Input::CaptureFinished {
+        id: cap.0,
+        generation: cap.1,
+        segment: 0,
+        outcome: CaptureOutcome::Speech,
+    });
+    let job = m.live_session().map(|(session, generation)| JobKey {
+        session,
+        generation,
+        worker_epoch: 0,
+    });
+    m.step(Input::TranscriptionDone {
+        job: job.unwrap(),
+        text: "phrase".into(),
+    });
+    assert_eq!(m.phase(), Phase::DraftReady);
+    assert_eq!(m.draft().unwrap().reason, DraftReason::ReviewOpened);
+}
+
+#[test]
+fn continuous_needs_automatic_delivery_and_stop_is_busy_otherwise() {
+    let mut m = Machine::new(0);
+    let fx = m.step(Input::Start {
+        id: sid(1),
+        now_ms: 0,
+        ready: Ok(()),
+        auto_delivery: false,
+        continuous: true,
+    });
+    assert!(has(&fx, |e| matches!(
+        e,
+        Effect::OpenCapture {
+            continuous: false,
+            ..
+        }
+    )));
+    assert!(!m.continuous());
+
+    let mut m = Machine::new(0);
+    let job = to_transcribing(&mut m, 2);
+    let fx = m.step(Input::Stop { id: job.session });
+    assert_eq!(notified(&fx), Some(Outcome::Rejected(AppError::Busy)));
 }

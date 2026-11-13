@@ -47,8 +47,8 @@ const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({
 });
 
 const config = {
-  schema_version: 2, revision: 1,
-  audio: { device_id: null, silence_ms: 1000, no_speech_timeout_ms: 8000, max_capture_ms: 120000 },
+  schema_version: 3, revision: 1,
+  audio: { device_id: null, silence_ms: 1000, no_speech_timeout_ms: 8000, max_capture_ms: 120000, continuous: false },
   transcription: { model_id: "whisper-base-multilingual", language: "auto", backend: "auto" },
   delivery: { mode: "auto_paste", clipboard_policy: "leave_text", excluded_apps: [] },
   shortcuts: { toggle: "Ctrl+Alt+Space", cancel: "Ctrl+Alt+Escape", paste_draft: null },

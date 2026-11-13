@@ -335,3 +335,124 @@ fn close_is_called_exactly_once_on_terminal_paths() {
     assert_eq!(terminal(&r), &DspEvent::Finished(Outcome::NoSpeech));
     assert_eq!(r.close_calls, 1);
 }
+
+/// Continuous dictation (ADR-014): utterances arrive as segments while the
+/// microphone stays open; only the no-speech timeout ends the capture.
+#[test]
+fn segmenting_reports_each_utterance_with_the_mic_open() {
+    let speech: Vec<f32> = jfk_16k().into_iter().take(16_000 * 3).collect();
+    let mut data = speech.clone();
+    data.extend(vec![0.0; 16_000 * 2]);
+    data.extend(speech);
+    data.extend(vec![0.0; 16_000 * 6]);
+    let closed = Arc::new(AtomicBool::new(false));
+    let mic = FakeMic {
+        data,
+        pos: 0,
+        chunk: 1600,
+        fail_at: None,
+        drains: 0,
+        format: NativeFormat {
+            sample_rate: 16_000,
+            channels: 1,
+            sample_format: "f32",
+        },
+        closed: Arc::clone(&closed),
+        close_calls: Arc::new(AtomicUsize::new(0)),
+    };
+    let (tx, rx) = mpsc::channel();
+    let probe = Arc::clone(&closed);
+    let s = DspSession::spawn_with(
+        Box::new(mic),
+        Box::new(EarshotDetector::new(DetectorConfig::default())),
+        EndpointConfig {
+            no_speech_timeout_ms: 3000,
+            ..Default::default()
+        },
+        Duration::from_millis(2),
+        true,
+        move |ev| {
+            let _ = tx.send((ev, probe.load(Ordering::SeqCst)));
+        },
+    )
+    .unwrap();
+    let mut segments = vec![];
+    let terminal = loop {
+        let (ev, closed_now) = rx.recv_timeout(Duration::from_secs(20)).unwrap();
+        match ev {
+            DspEvent::Segment(o) => {
+                assert!(!closed_now, "segments are reported while listening");
+                segments.push(o);
+            }
+            DspEvent::Finished(o) => {
+                assert!(closed_now, "microphone closed before the terminal event");
+                break o;
+            }
+            DspEvent::Fault(_) | DspEvent::Aborted => panic!("{ev:?}"),
+            DspEvent::Level(_) | DspEvent::Onset => {}
+        }
+    };
+    s.join();
+    assert_eq!(segments.len(), 2, "{segments:?}");
+    for seg in &segments {
+        let Outcome::Utterance {
+            samples, reason, ..
+        } = seg
+        else {
+            panic!("{seg:?}")
+        };
+        assert_eq!(*reason, FinishReason::Silence);
+        assert!(samples.len() > 16_000 * 2, "each utterance is complete");
+    }
+    assert_eq!(terminal, Outcome::NoSpeech, "silence ends the capture");
+}
+
+#[test]
+fn segmenting_stop_finishes_the_current_utterance() {
+    let mut data: Vec<f32> = jfk_16k().into_iter().take(16_000 * 3).collect();
+    data.extend(vec![0.0; 16_000 * 2]);
+    let closed = Arc::new(AtomicBool::new(false));
+    let mic = FakeMic {
+        data,
+        pos: 0,
+        chunk: 1600,
+        fail_at: None,
+        drains: 0,
+        format: NativeFormat {
+            sample_rate: 16_000,
+            channels: 1,
+            sample_format: "f32",
+        },
+        closed,
+        close_calls: Arc::new(AtomicUsize::new(0)),
+    };
+    let (tx, rx) = mpsc::channel();
+    let s = DspSession::spawn_with(
+        Box::new(mic),
+        Box::new(EarshotDetector::new(DetectorConfig::default())),
+        EndpointConfig::default(),
+        Duration::from_millis(2),
+        true,
+        move |ev| {
+            let _ = tx.send(ev);
+        },
+    )
+    .unwrap();
+    // First utterance as a segment, then the (silent, never-ending) capture
+    // finishes on an explicit stop.
+    loop {
+        if let DspEvent::Segment(_) = rx.recv_timeout(Duration::from_secs(20)).unwrap() {
+            break;
+        }
+    }
+    s.stop();
+    let last = loop {
+        match rx.recv_timeout(Duration::from_secs(20)).unwrap() {
+            DspEvent::Finished(o) => break o,
+            DspEvent::Level(_) | DspEvent::Onset => {}
+            other => panic!("{other:?}"),
+        }
+    };
+    s.join();
+    assert_eq!(last, Outcome::NoSpeech);
+}

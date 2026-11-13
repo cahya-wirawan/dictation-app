@@ -217,6 +217,8 @@ pub struct SettingsSummary {
     pub custom_input_device: bool,
     pub excluded_app_count: usize,
     pub show_hud: bool,
+    /// Continuous dictation (ADR-014).
+    pub continuous: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

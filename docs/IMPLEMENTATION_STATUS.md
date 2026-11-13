@@ -54,6 +54,17 @@ The Tauri crate compiles and links on macOS, and the bundle layout is correct.
 
 Lockfiles: `Cargo.lock`, `pnpm-lock.yaml`.
 
+## Continuous dictation (after v0.9.0, ADR-014)
+
+Opt-in setting `audio.continuous` (schema v3). Implemented across the layers:
+
+- **Audio:** `Pipeline::segmenting()` re-arms a fresh endpointer after each utterance; `DspSession::spawn_with(…, true, …)` reports `DspEvent::Segment` with the microphone still open. The no-speech timeout and explicit stop stay terminal.
+- **Reducer:** a continuous `Live` keeps its capture generation and gives every later phrase a new generation, so phrase results are fenced separately. Utterances queue while one phrase is in flight. The target token is kept until the session ends.
+- **Actor:** audio is keyed by (session, segment). Toggle during Transcribing or Delivering stops a continuous session after the phrase in flight; otherwise it is still `BUSY`. The snapshot reports `continuous`.
+- **Delivery:** `PlatformDelivery` no longer drops the token at dispatch. The reducer's `ReleaseTarget` ends it, which it already did for every non-continuous session.
+
+Tests: 9 reducer fixtures, and the fuzz test now also drives continuous sessions (about 100 chained phrases per run, no duplicate dispatch, no inference without accepted speech, no utterance transcribed twice). Also 2 DSP segmenting tests and 4 actor tests with the scripted platform: two phrases into the same target, stop by shortcut, focus change → draft with the mic closed, copy-only ignores the setting. **Not yet run on a real desktop.**
+
 ## Universal macOS build (after M7, ADR-013)
 
 The macOS DMG is universal: arm64 + x86_64.

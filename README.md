@@ -7,6 +7,7 @@ Local Dictation is a small desktop dictation app that runs entirely on your comp
 ## Features
 
 - **Global shortcut dictation.** Toggle to start, then stop by pausing (1 s of silence by default) or by pressing the shortcut again. A separate shortcut cancels.
+- **Optional continuous dictation.** Keep listening after each phrase and paste every phrase as you pause, until you press the shortcut again or stop talking.
 - **Pastes into the original field, exactly once.** The app records which app, window and text field were focused when you started. It pastes only if that same field is still focused when the text is ready. Otherwise it keeps a **draft** you can review, edit and copy.
 - **Safe by default.** Never pastes into password fields, terminals or apps you exclude. Never presses Enter, never steals focus, never retries a paste.
 - **Fully local.** Audio stays in memory and is never written to disk. Transcription runs on the CPU in a separate worker process. The only network access is a model download you start yourself.
@@ -73,6 +74,8 @@ The app lives in the menu bar (macOS) or the system tray (Windows, Linux). Setup
 2. Press the start shortcut and speak.
 3. Pause, or press the shortcut again. The text is pasted into the field you started in.
 
+With **continuous dictation** on (Settings → Recording), the app keeps listening after step 3 and pastes each further phrase when you pause. Press the shortcut again to stop.
+
 If the app can't paste safely, the text becomes a **draft**. That happens when you switched app or field, the target is a password field or terminal, or the app couldn't identify the field. Open the draft from the tray menu with **Review text…** to edit or copy it. Drafts live only in memory and are cleared after 10 minutes, on quit, sleep, screen lock or logout.
 
 ### Settings
@@ -80,7 +83,7 @@ If the app can't paste safely, the text becomes a **draft**. That happens when y
 Open **Settings…** from the tray menu:
 
 - **General:** status HUD, reduced motion, launch at login.
-- **Recording:** microphone, silence timeout (0.5–2.5 s), no-speech timeout, microphone test.
+- **Recording:** microphone, silence timeout (0.5–2.5 s), no-speech timeout, continuous dictation, microphone test.
 - **Shortcuts:** start/finish, cancel and an optional paste-draft shortcut.
 - **Models:** language, model download, import, verify, unload.
 - **Delivery:** automatic paste or copy-only, excluded apps.
