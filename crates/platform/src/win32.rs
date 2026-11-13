@@ -780,6 +780,24 @@ mod tests {
         }
     }
 
+    /// Runs `f` on another thread while this (window-owning) thread pumps
+    /// messages. UI Automation and WM_PASTE are answered by the thread that
+    /// owns the windows, so calling them from it would deadlock; the app
+    /// itself queries from the delivery thread, which owns no windows.
+    fn off_thread<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+        let h = std::thread::spawn(f);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !h.is_finished() {
+            pump(20);
+            assert!(std::time::Instant::now() < deadline, "platform call hung");
+        }
+        h.join().unwrap_or_else(|e| std::panic::resume_unwind(e))
+    }
+
+    fn capture() -> TargetSnapshot {
+        off_thread(|| capture_target().unwrap())
+    }
+
     fn focus(h: HWND) {
         // SAFETY: child of our foreground window.
         let _ = unsafe { SetFocus(Some(h)) };
@@ -798,7 +816,7 @@ mod tests {
         );
 
         focus(r.edit);
-        let t = capture_target().unwrap();
+        let t = capture();
         eprintln!("captured: {t:?}");
         assert_eq!(t.field, FieldClass::Editable);
         assert!(t.input_allowed, "same-integrity target must allow input");
@@ -807,31 +825,38 @@ mod tests {
             Some(true)
         );
         // This process is the app here, and the app itself is never a target.
-        assert_eq!(check_target(&t), TargetCheck::OwnApp);
+        let (t, check) = off_thread(move || {
+            let c = check_target(&t);
+            (t, c)
+        });
+        assert_eq!(check, TargetCheck::OwnApp);
 
         // Field identity changes when focus moves inside the same window.
         focus(r.other);
-        let t2 = capture_target().unwrap();
+        let t2 = capture();
         assert_eq!(t2.hwnd, t.hwnd);
         assert_ne!(
             t2.element, t.element,
             "UIA runtime id must distinguish fields"
         );
         focus(r.password);
-        assert_eq!(capture_target().unwrap().field, FieldClass::Secure);
+        assert_eq!(capture().field, FieldClass::Secure);
 
         // Unicode through the real clipboard and one real Ctrl+V.
         focus(r.edit);
         let text = "Grüße — naïve café, 😀 漢字 ok";
         assert!(physical_modifiers_down() == Some(false));
-        let seq = clipboard_write_text(text).unwrap();
+        let seq = off_thread(move || clipboard_write_text(text).unwrap());
         assert!(seq > 0);
-        assert_eq!(send_paste_chord().unwrap(), DispatchOutcome::Sent);
+        assert_eq!(
+            off_thread(|| send_paste_chord().unwrap()),
+            DispatchOutcome::Sent
+        );
         pump(500);
         let got = text_of(r.edit);
         assert_eq!(got, text, "destination did not receive the exact text once");
         assert_eq!(
-            focused_text_value().as_deref(),
+            off_thread(focused_text_value).as_deref(),
             Some(text),
             "UIA value readback"
         );
