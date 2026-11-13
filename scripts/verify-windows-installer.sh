@@ -4,28 +4,37 @@
 # worker, then uninstalls and checks that the program files are gone
 # (docs/10 §1, §3). Prints a Markdown summary. Windows (Git Bash) only.
 set -euo pipefail
+# Git Bash rewrites POSIX-looking arguments for native programs, so "/S"
+# would reach NSIS as a drive path and the installer would wait in its GUI.
+export MSYS_NO_PATHCONV=1
 setup="${1:?usage: verify-windows-installer.sh <setup.exe>}"
 fail() { echo "FAIL: $*"; exit 1; }
 # Progress goes to stderr (the job log); stdout is the Markdown summary.
 log() { echo "[$(date -u +%H:%M:%S)] $*" >&2; }
 # Every phase is bounded; on a hang, show what is still running.
+# Windows with a title (e.g. a dialog) are listed before the process is killed.
 bounded() {
   local secs=$1; shift
-  local rc=0
-  timeout "$secs" "$@" || rc=$?
-  if [[ $rc -eq 124 ]]; then
-    log "TIMEOUT after ${secs}s: $*"
-    tasklist >&2 || true
-    fail "timed out: $*"
-  fi
-  return $rc
+  "$@" &
+  local pid=$! t=0
+  while kill -0 "$pid" 2>/dev/null; do
+    if ((t >= secs)); then
+      log "TIMEOUT after ${secs}s: $*"
+      tasklist /v /fo csv 2>/dev/null | grep -v '"N/A"$' >&2 || true
+      kill "$pid" 2>/dev/null || true
+      fail "timed out: $*"
+    fi
+    sleep 1
+    t=$((t + 1))
+  done
+  wait "$pid"
 }
 cd "$(dirname "$0")/.."
 
 wv2=none
 for key in 'HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' \
            'HKCU\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'; do
-  v=$(MSYS_NO_PATHCONV=1 reg query "$key" /v pv 2>/dev/null | awk '/pv/ {print $3}') || true
+  v=$(reg query "$key" /v pv 2>/dev/null | awk '/pv/ {print $3}') || true
   [[ -n "${v:-}" ]] && wv2="$v" && break
 done
 log "WebView2 runtime before install: $wv2"
