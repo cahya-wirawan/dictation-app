@@ -1,6 +1,6 @@
 # Implementation status
 
-Last updated: 13 November 2026 · **M0 partially complete · M1–M7 implemented, native GUI runs and release credentials pending** · Version 0.7.0
+Last updated: 13 November 2026 · **M0 partially complete · M1–M7 implemented, native GUI runs and release credentials pending** · Version 0.8.0
 
 **M0 is not done.** Its exit evidence must come from a macOS Apple Silicon release-like build (docs/07 §2), and no Mac has run this code yet. This round ran on a headless Linux host. Everything that can be proven without a display, microphone or macOS is proven below. Everything else is written but marked **unverified**.
 
@@ -66,9 +66,9 @@ The exit criterion is a "published limited support matrix; no broad support clai
 | **Sleep, shutdown, lock** | `watch_suspend` | logind `PrepareForSleep(true)`, `PrepareForShutdown(true)`, and `Lock` on the session from `GetSessionByPID`. The watch starts without blocking (tested). Firing it needs a real sleep or lock, which was not done. |
 | **Automatic paste** | n/a | **Off by design.** No editable-element identity (docs/05 §4). AT-SPI was not attempted within the time box. |
 | **UI** | `src/components/SessionNotice.tsx`, `Snapshot.session` | On Linux the app explains three things: drafts instead of paste; on Wayland, use Start in the window; Copy unavailable without X11/XWayland. These come from the probe, which runs once at startup. |
-| **Packaging** | CI `linux-package`, `scripts/verify-linux-deb.sh` | A `.deb` for Ubuntu 24.04: install with apt, run inference through `/usr/bin/dictation-worker`, remove. AppImage, Flatpak and RPM were not attempted. |
+| **Packaging** | CI `linux-package`, `scripts/verify-linux-deb.sh` | A `.deb` for Ubuntu 24.04: install with apt, run inference through `/usr/bin/dictation-worker`, remove. AppImage, Flatpak and RPM were not attempted. **Result (CI run 43386942361):** an 8.3 MB `Local Dictation_0.7.0_amd64.deb`, depending on `libayatana-appindicator3-1`, `libwebkit2gtk-4.1-0` and `libgtk-3-0`. It installs `/usr/bin/dictation-app` and `/usr/bin/dictation-worker`. The installed worker gives JFK median 1.17 s (RTF 0.11), normalized WER 0%. The package is then removed. |
 
-**Measured on this host (Ubuntu 22.04, tty, no display):** probe `kind: none`, `x11_reachable: false`, `logind: true`. **Under Xvfb:** `kind: x11`, `x11_reachable: true`, `ewmh_active_window: false` (no window manager).
+**Measured on this host (Ubuntu 22.04, tty, no display):** probe `kind: none`, `x11_reachable: false`, `logind: true`. **Under Xvfb:** `kind: x11`, `x11_reachable: true`, `ewmh_active_window: false` (no window manager). **In CI (`ubuntu-24.04`, run 43386942361):** without a display, the probe reports `kind: none` and `logind: true`. Under `xvfb-run`, `x11_clipboard_roundtrip_and_ownership_handover` and `x11_window_identity_changes_are_reported` pass.
 
 ## M6: Windows
 
@@ -94,7 +94,8 @@ The exit evidence is "separate Windows release evidence" (docs/07 §2). **Partia
    - A synthetic Alt tap, used to satisfy the foreground-lock rule, made `DefWindowProc` enter modal menu mode (`SC_KEYMENU`) inside `DispatchMessage`. A Shift tap satisfies the rule without that.
    The test now has stage markers and a 120 s watchdog.
 5. **Git Bash rewrites POSIX-looking arguments for native programs.** `setup.exe /S` reached NSIS as a drive path, so the installer waited in its GUI until the job timeout. The verifier sets `MSYS_NO_PATHCONV=1` and bounds every phase.
-6. **The GitHub `windows-2025` runner reports 2 logical CPUs** (`nproc`), so its timings are not comparable with the docs/08 reference hardware.
+6. **Open: the first transcription on the Windows runner is slow.** In debug test builds, the first job took about 57 s and later jobs about 1.3 s (`warm 11 s fixture: [57.4 s, 1.28 s, 1.26 s]`, CI run 43386942361). It happens once per worker process: another run measured 72.2 s, then 1.44 s and 1.53 s, and a second test timed out on its own new worker. The worker tests now allow 150 s per real job. The installed release worker showed no such outlier (cold start, including the first job, 3.2 s). The cause is not known: Defender scanning, first-touch memory, and the debug build are all candidates. Check it on a real Windows machine before release.
+7. **The GitHub `windows-2025` runner reports 2 logical CPUs** (`nproc`), so its timings are not comparable with the docs/08 reference hardware.
 
 **Not done in M6:**
 
