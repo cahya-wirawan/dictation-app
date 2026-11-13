@@ -2,7 +2,7 @@
 
 Last updated: 13 November 2026 · **M0 partially complete · M1–M7 implemented, native GUI runs and release credentials pending** · Version 0.9.0
 
-**M0 is not done.** Its exit evidence must come from a macOS Apple Silicon release-like build (docs/07 §2), and no Mac has run this code yet. This round ran on a headless Linux host. Everything that can be proven without a display, microphone or macOS is proven below. Everything else is written but marked **unverified**.
+**M0 is not done.** Its exit evidence must come from a macOS Apple Silicon release-like build (docs/07 §2), and no Mac has run this code yet. This round ran on a headless Linux host. *Update, 13 November 2026:* the first real GUI run is a user report from an **Intel** MacBook Pro: automatic paste into Notes worked (see "Universal macOS build"). Apple Silicon GUI evidence is still missing. Everything that can be proven without a display, microphone or macOS is proven below. Everything else is written but marked **unverified**.
 
 ## Where this ran
 
@@ -70,7 +70,8 @@ The macOS DMG is universal: arm64 + x86_64.
 | x86_64 (Rosetta 2) | 1581 ms | 0.144 | 2366 ms | 751 ms | 0.0% |
 
 - **Rosetta proves correctness, not Intel speed.** Rosetta translates AVX2 only from macOS 15, so this check needs a macOS 15+ host; CI uses `macos-26`. Apple Silicon Macs always run the arm64 slice.
-- **Not done:** qualification and timing on a real Intel Mac.
+- **Field report (13 November 2026, by the user):** v0.9.0 universal DMG on a MacBook Pro 2019 (2.6 GHz 6-core Intel Core i7), macOS version not recorded. Whisper Base. With Accessibility granted, the dictated text was **pasted automatically into Notes**, and appeared about 1–2 s after the user stopped speaking. This is the first run of the app in a real GUI session, and the first on Intel hardware. It is one user, one machine and one target app, with timing judged by eye: not a docs/08 qualification run.
+- **Not done:** measured qualification on Intel (docs/08 gates, supported-app matrix, trigger latency, RSS, idle CPU).
 
 ## M7: Linux experiments
 
