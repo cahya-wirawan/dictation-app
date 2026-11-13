@@ -789,10 +789,12 @@ mod tests {
             let password = mk(110, ES_PASSWORD);
             stage("rig: show + foreground");
             let _ = ShowWindow(top, SW_SHOW);
-            // A process may only take the foreground right after input; a
-            // synthetic Alt tap satisfies the foreground-lock rule.
-            let alt = [key(VK_MENU, false), key(VK_MENU, true)];
-            let _ = SendInput(&alt, i32::try_from(std::mem::size_of::<INPUT>()).unwrap());
+            // A process may only take the foreground right after input, so
+            // send a synthetic Shift tap. Not Alt: an Alt key-up makes
+            // DefWindowProc enter modal menu mode (SC_KEYMENU) inside
+            // DispatchMessage, which never returns without further input.
+            let tap = [key(VK_SHIFT, false), key(VK_SHIFT, true)];
+            let _ = SendInput(&tap, i32::try_from(std::mem::size_of::<INPUT>()).unwrap());
             let _ = SetForegroundWindow(top);
             stage("rig: pump");
             pump(300);
