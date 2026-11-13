@@ -340,9 +340,11 @@ fn silence_is_no_speech_without_inference() {
 #[test]
 fn second_toggle_is_explicit_stop_with_one_job() {
     let (w, jobs, _) = fake_worker("ok", Duration::ZERO);
-    // Speech without trailing silence, delivered slowly: only an explicit stop finishes it.
+    // Speech without trailing silence: once the 2 s are drained the source
+    // goes quiet (no silence frames), so only an explicit stop finishes it.
+    // 256 samples per poll keeps up even with ~15 ms Windows timer ticks.
     let speech: Vec<f32> = jfk().into_iter().skip(5_000).take(16_000 * 2).collect();
-    let r = Rig::new(speech, 32, None, EndpointConfig::default(), w);
+    let r = Rig::new(speech, 256, None, EndpointConfig::default(), w);
     r.h.send(Command::Toggle);
     std::thread::sleep(Duration::from_millis(1500));
     r.h.send(Command::Toggle);
