@@ -2,7 +2,7 @@
 
 Local Dictation is a small desktop dictation app that runs entirely on your computer. Press a shortcut, speak, and pause. The app transcribes what you said with a local [Whisper](https://github.com/openai/whisper) model ([whisper.cpp](https://github.com/ggml-org/whisper.cpp)) and pastes the text into the app and text field you started in. No account, no cloud, no recordings kept.
 
-> **Status: pre-1.0 (v0.9.0).** The core features are implemented and tested in CI on macOS, Windows and Linux. The app has not yet been qualified on real desktops with a person at the keyboard, and the macOS build is not notarized. Details, measurements and open items are in [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md).
+> **Status: pre-1.0 (v0.9.0).** The core features are implemented and tested in CI on macOS, Windows and Linux. The first hands-on report is in: on an Intel MacBook Pro (2019), dictation pasted automatically into Notes about 1–2 s after the user stopped speaking. Formal qualification on real desktops is still pending, and the macOS build is not notarized. Details, measurements and open items are in [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md).
 
 ## Features
 
