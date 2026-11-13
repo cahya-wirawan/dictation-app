@@ -17,6 +17,8 @@ All notable changes to Local Dictation are documented here. The format follows [
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-13
+
 ### Added (M6, Windows)
 
 - **Windows adapter:** captures the foreground app and window, and the focused UI Automation element. It refuses password fields, read-only fields, terminals and apps running at a higher integrity level (administrator). Pasting is a Unicode clipboard write plus one Ctrl+V.
@@ -183,7 +185,8 @@ Milestone M0 feasibility spike, partially complete. See `docs/IMPLEMENTATION_STA
 - No dictation session flow yet: there is no coordinator, config persistence, model manager or onboarding (milestone M1 and later).
 - Performance numbers so far come from a Linux x86_64 development host, not the reference hardware.
 
-[Unreleased]: https://github.com/cahya-wirawan/dictation-app/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/cahya-wirawan/dictation-app/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/cahya-wirawan/dictation-app/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/cahya-wirawan/dictation-app/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/cahya-wirawan/dictation-app/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/cahya-wirawan/dictation-app/compare/v0.3.0...v0.4.0
