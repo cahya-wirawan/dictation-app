@@ -1,6 +1,6 @@
 # Implementation status
 
-Last updated: 12 November 2026 · **M0 partially complete · M1–M6 implemented, native GUI runs and release credentials pending** · Version 0.6.0
+Last updated: 13 November 2026 · **M0 partially complete · M1–M6 implemented, native GUI runs and release credentials pending** · Version 0.6.0
 
 **M0 is not done.** Its exit evidence must come from a macOS Apple Silicon release-like build (docs/07 §2), and no Mac has run this code yet. This round ran on a headless Linux host. Everything that can be proven without a display, microphone or macOS is proven below. Everything else is written but marked **unverified**.
 
@@ -66,7 +66,7 @@ The exit evidence is "separate Windows release evidence" (docs/07 §2). **Partia
 | **Session watch** | `watch_suspend` | A hidden top-level window on its own thread: `WTSRegisterSessionNotification` (lock, logoff, console/remote disconnect), `PBT_APMSUSPEND`, end-session. The test checks that it starts and stops; the events themselves were not fired. |
 | **Permissions** | `permission_status`, `open_privacy_settings` | Microphone status comes from the consent store (machine, user, NonPackaged) and the app links to `ms-settings:privacy-microphone`. Accessibility reports Granted because Windows needs no grant at equal integrity. Onboarding text is platform-specific. |
 | **Worker** | `crates/transcription-protocol/src/job.rs`, `client.rs`, worker `main.rs`, `build.rs` | **Lifetime:** a `KILL_ON_JOB_CLOSE` job object, tested by killing a child through job close. **Spawn:** `CREATE_NO_WINDOW`, with only `SystemRoot` kept. **Model open:** reparse-point-safe, checked on the opened handle. **Build:** MSVC static-lib discovery, `advapi32`. |
-| **Installer** | CI `windows-installer`, `scripts/verify-windows-installer.sh` | NSIS installer, per-user (`currentUser`), with an embedded WebView2 bootstrapper. It is installed silently as the runner user, the installed worker transcribes the JFK fixture, and it is uninstalled. Result: WINDOWS_INSTALLER |
+| **Installer** | CI `windows-installer`, `scripts/verify-windows-installer.sh` | NSIS installer, per-user (`currentUser`), with an embedded WebView2 bootstrapper. It is installed silently as the runner user, the installed worker transcribes the JFK fixture, and it is uninstalled. **Result (CI run 43370896636):** a 6.1 MB `Local Dictation_0.6.0_x64-setup.exe`. The silent install takes 2 s to `%LOCALAPPDATA%\Local Dictation` (`dictation-app.exe`, `dictation-worker.exe`, `THIRD_PARTY_NOTICES.md`, `uninstall.exe`) with no elevation prompt; WebView2 156 was already present. The installed release worker gives JFK median 2.9 s (RTF 0.26), normalized WER 0%; cold start median 3.2 s, model load 305 ms. The uninstall removes the program files. The bench does not read process RSS on Windows, so its "0 MiB" peak means *not measured*. |
 
 ### M6 findings
 
@@ -77,7 +77,8 @@ The exit evidence is "separate Windows release evidence" (docs/07 §2). **Partia
    - The test thread owned the Edit controls and also queried UIA. UIA calls are answered by the window-owning thread, so it blocked on itself. The test now queries from another thread while the window thread pumps. The app is not affected: it queries from the delivery thread, which owns no windows, and its targets belong to other processes.
    - A synthetic Alt tap, used to satisfy the foreground-lock rule, made `DefWindowProc` enter modal menu mode (`SC_KEYMENU`) inside `DispatchMessage`. A Shift tap satisfies the rule without that.
    The test now has stage markers and a 120 s watchdog.
-5. **The GitHub `windows-2025` runner reports 2 logical CPUs** (`nproc`), so its timings are not comparable with the docs/08 reference hardware.
+5. **Git Bash rewrites POSIX-looking arguments for native programs.** `setup.exe /S` reached NSIS as a drive path, so the installer waited in its GUI until the job timeout. The verifier sets `MSYS_NO_PATHCONV=1` and bounds every phase.
+6. **The GitHub `windows-2025` runner reports 2 logical CPUs** (`nproc`), so its timings are not comparable with the docs/08 reference hardware.
 
 **Not done in M6:**
 
