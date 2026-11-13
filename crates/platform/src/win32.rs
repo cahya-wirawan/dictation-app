@@ -692,6 +692,23 @@ mod tests {
     };
     use windows::core::w;
 
+    static STAGE: std::sync::Mutex<&'static str> = std::sync::Mutex::new("start");
+
+    fn stage(s: &'static str) {
+        eprintln!("e2e stage: {s}");
+        *STAGE.lock().unwrap() = s;
+    }
+
+    /// A hung Win32/UIA call cannot be interrupted; name the stage and exit
+    /// instead of letting CI sit until the job timeout.
+    fn watchdog(secs: u64) {
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(secs));
+            eprintln!("e2e watchdog: stuck at stage {:?}", *STAGE.lock().unwrap());
+            std::process::exit(101);
+        });
+    }
+
     fn pump(ms: u64) {
         let end = std::time::Instant::now() + std::time::Duration::from_millis(ms);
         let mut msg = MSG::default();
@@ -807,7 +824,19 @@ mod tests {
     #[test]
     #[ignore = "needs an interactive Windows desktop"]
     fn real_clipboard_sendinput_and_uia_roundtrip() {
+        watchdog(120);
+        // The window-owning thread is an STA, as a GUI thread should be, so
+        // UIA's cross-thread calls into the Edit providers can be served.
+        // SAFETY: paired with the thread's lifetime; test-only.
+        let _ = unsafe {
+            windows::Win32::System::Com::CoInitializeEx(
+                None,
+                windows::Win32::System::Com::COINIT_APARTMENTTHREADED,
+            )
+        };
+        stage("rig");
         let r = rig();
+        stage("foreground");
         // SAFETY: plain query.
         assert_eq!(
             unsafe { GetForegroundWindow() },
@@ -815,6 +844,7 @@ mod tests {
             "test window did not become foreground"
         );
 
+        stage("capture edit");
         focus(r.edit);
         let t = capture();
         eprintln!("captured: {t:?}");
@@ -825,6 +855,7 @@ mod tests {
             Some(true)
         );
         // This process is the app here, and the app itself is never a target.
+        stage("check_target");
         let (t, check) = off_thread(move || {
             let c = check_target(&t);
             (t, c)
@@ -832,6 +863,7 @@ mod tests {
         assert_eq!(check, TargetCheck::OwnApp);
 
         // Field identity changes when focus moves inside the same window.
+        stage("capture other");
         focus(r.other);
         let t2 = capture();
         assert_eq!(t2.hwnd, t.hwnd);
@@ -839,6 +871,7 @@ mod tests {
             t2.element, t.element,
             "UIA runtime id must distinguish fields"
         );
+        stage("capture password");
         focus(r.password);
         assert_eq!(capture().field, FieldClass::Secure);
 
@@ -846,13 +879,16 @@ mod tests {
         focus(r.edit);
         let text = "Grüße — naïve café, 😀 漢字 ok";
         assert!(physical_modifiers_down() == Some(false));
+        stage("clipboard");
         let seq = off_thread(move || clipboard_write_text(text).unwrap());
         assert!(seq > 0);
+        stage("paste");
         assert_eq!(
             off_thread(|| send_paste_chord().unwrap()),
             DispatchOutcome::Sent
         );
         pump(500);
+        stage("readback");
         let got = text_of(r.edit);
         assert_eq!(got, text, "destination did not receive the exact text once");
         assert_eq!(
