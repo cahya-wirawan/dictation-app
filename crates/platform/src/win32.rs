@@ -715,7 +715,11 @@ mod tests {
         while std::time::Instant::now() < end {
             // SAFETY: message pump for windows owned by this thread.
             unsafe {
-                while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                // Bounded even if a message is regenerated forever (e.g.
+                // WM_PAINT on a desktop that never validates the window).
+                while std::time::Instant::now() < end
+                    && PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool()
+                {
                     let _ = TranslateMessage(&msg);
                     DispatchMessageW(&msg);
                 }
@@ -744,6 +748,7 @@ mod tests {
     fn rig() -> Rig {
         // SAFETY: plain window creation on this thread, destroyed at the end.
         unsafe {
+            stage("rig: top window");
             let top = CreateWindowExW(
                 WINDOW_EX_STYLE(0),
                 w!("STATIC"),
@@ -778,15 +783,18 @@ mod tests {
                 )
                 .unwrap()
             };
+            stage("rig: edit controls");
             let edit = mk(10, ES_MULTILINE);
             let other = mk(60, ES_MULTILINE);
             let password = mk(110, ES_PASSWORD);
+            stage("rig: show + foreground");
             let _ = ShowWindow(top, SW_SHOW);
             // A process may only take the foreground right after input; a
             // synthetic Alt tap satisfies the foreground-lock rule.
             let alt = [key(VK_MENU, false), key(VK_MENU, true)];
             let _ = SendInput(&alt, i32::try_from(std::mem::size_of::<INPUT>()).unwrap());
             let _ = SetForegroundWindow(top);
+            stage("rig: pump");
             pump(300);
             Rig {
                 top,
