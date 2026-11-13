@@ -94,7 +94,8 @@ The exit evidence is "separate Windows release evidence" (docs/07 §2). **Partia
    - A synthetic Alt tap, used to satisfy the foreground-lock rule, made `DefWindowProc` enter modal menu mode (`SC_KEYMENU`) inside `DispatchMessage`. A Shift tap satisfies the rule without that.
    The test now has stage markers and a 120 s watchdog.
 5. **Git Bash rewrites POSIX-looking arguments for native programs.** `setup.exe /S` reached NSIS as a drive path, so the installer waited in its GUI until the job timeout. The verifier sets `MSYS_NO_PATHCONV=1` and bounds every phase.
-6. **The GitHub `windows-2025` runner reports 2 logical CPUs** (`nproc`), so its timings are not comparable with the docs/08 reference hardware.
+6. **Open: the first transcription on the Windows runner is slow.** In debug test builds, the first job took about 57 s and later jobs about 1.3 s (`warm 11 s fixture: [57.4 s, 1.28 s, 1.26 s]`, CI run 43386942361). One run timed out at the old 60 s limit, so the test now allows 150 s per job. The installed release worker showed no such outlier (cold start, including the first job, 3.2 s). The cause is not known: Defender scanning, first-touch memory, and the debug build are all candidates. Check it on a real Windows machine before release.
+7. **The GitHub `windows-2025` runner reports 2 logical CPUs** (`nproc`), so its timings are not comparable with the docs/08 reference hardware.
 
 **Not done in M6:**
 

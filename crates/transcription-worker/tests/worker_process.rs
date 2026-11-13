@@ -252,6 +252,10 @@ fn jfk_fixture_transcribes_offline_on_cpu() {
     let mut c = WorkerClient::spawn(&worker_exe(), 10, T).unwrap();
     let load_ms = c.load_model(&path, &sha, Duration::from_secs(60)).unwrap();
 
+    // Generous per-job limit: on the GitHub Windows runner the first job of
+    // a debug test build has taken ~57 s (later jobs ~1.3 s); see the M6/M7
+    // findings in docs/IMPLEMENTATION_STATUS.md. Timings are still printed.
+    let job_limit = Duration::from_secs(150);
     let mut timings = Vec::new();
     let mut texts = Vec::new();
     for g in 0..3 {
@@ -262,7 +266,7 @@ fn jfk_fixture_transcribes_offline_on_cpu() {
                 j,
                 Language::try_from("en".to_string()).unwrap(),
                 &pcm,
-                Duration::from_secs(60),
+                job_limit,
             )
             .unwrap();
         timings.push(started.elapsed());
@@ -271,7 +275,7 @@ fn jfk_fixture_transcribes_offline_on_cpu() {
         texts.push(r.text);
     }
     let auto = c
-        .transcribe(job(10, 9), Language::auto(), &pcm, Duration::from_secs(60))
+        .transcribe(job(10, 9), Language::auto(), &pcm, job_limit)
         .unwrap();
 
     let norm = normalize(&texts[0]);
