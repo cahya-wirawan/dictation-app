@@ -4,9 +4,9 @@
 //! exposed over IPC. Snapshots hold native references and are deliberately not
 //! `Serialize`, so a target token can never reach the frontend (docs/05 §4).
 //!
-//! Platform status (M0): macOS is implemented but **unverified on hardware**;
-//! every other platform reports `Unknown`, which disables automatic delivery
-//! and leaves the draft/Copy path.
+//! Platform status: macOS (AX + CGEvent) and Windows (UI Automation +
+//! SendInput) adapters; every other platform reports `Unknown`, which
+//! disables automatic delivery and leaves the draft/Copy path.
 
 use std::time::{Duration, Instant};
 
@@ -15,9 +15,14 @@ mod macos;
 #[cfg(target_os = "macos")]
 pub use macos::*;
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+mod win32;
+#[cfg(windows)]
+pub use win32::*;
+
+#[cfg(not(any(target_os = "macos", windows)))]
 mod unsupported;
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 pub use unsupported::*;
 
 #[derive(Debug, Clone, PartialEq)]

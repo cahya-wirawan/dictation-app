@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { ShortcutField } from "../../components/ShortcutField";
-import { t } from "../../i18n";
+import { t, tp } from "../../i18n";
 import {
   checkPermissions,
   completeOnboarding,
@@ -80,7 +80,9 @@ export function Onboarding({ snapshot, config, refresh, onConfig, onDone, onErro
             <p className="hint">{t("onb.welcome.clipboard")}</p>
           </>
         )}
-        {step === "microphone" && <MicStep heading={heading} perm={perm} recheck={recheck} onError={onError} />}
+        {step === "microphone" && (
+          <MicStep heading={heading} perm={perm} recheck={recheck} onError={onError} platform={snapshot.platform} />
+        )}
         {step === "model" && (
           <>
             <h1 id="onb-h" ref={heading} tabIndex={-1}>{t("onb.model.title")}</h1>
@@ -98,13 +100,21 @@ export function Onboarding({ snapshot, config, refresh, onConfig, onDone, onErro
           </>
         )}
         {step === "paste" && (
-          <PasteStep heading={heading} perm={perm} recheck={recheck} config={config} onConfig={onConfig} onError={onError} />
+          <PasteStep
+            heading={heading}
+            perm={perm}
+            recheck={recheck}
+            config={config}
+            onConfig={onConfig}
+            onError={onError}
+            platform={snapshot.platform}
+          />
         )}
         {step === "trial" && <TrialStep heading={heading} onError={onError} />}
         {step === "done" && (
           <>
             <h1 id="onb-h" ref={heading} tabIndex={-1}>{t("onb.done.title")}</h1>
-            <p>{t("onb.done.body")}</p>
+            <p>{tp("onb.done.body", snapshot.platform)}</p>
             <p>Shortcut: <kbd>{snapshot.shortcuts.toggle}</kbd></p>
             <label className="check">
               <input
@@ -141,9 +151,10 @@ export function Onboarding({ snapshot, config, refresh, onConfig, onDone, onErro
 interface StepProps {
   heading: RefObject<HTMLHeadingElement | null>;
   onError: (m: string) => void;
+  platform?: string;
 }
 
-function MicStep({ heading, perm, recheck, onError }: StepProps & { perm: Permissions | null; recheck: () => void }) {
+function MicStep({ heading, perm, recheck, onError, platform = "" }: StepProps & { perm: Permissions | null; recheck: () => void }) {
   const [testing, setTesting] = useState(false);
   const [level, setLevel] = useState(0);
   useEvent(useCallback(() => onMicTestLevel((l) => { setLevel(l.level); }), []));
@@ -161,14 +172,14 @@ function MicStep({ heading, perm, recheck, onError }: StepProps & { perm: Permis
       )}
       {status === "denied" && (
         <div role="alert">
-          <p className="error">{t("onb.mic.denied")}</p>
+          <p className="error">{tp("onb.mic.denied", platform)}</p>
           <div className="row">
-            <button type="button" onClick={() => { void openPrivacySettings("microphone"); }}>{t("settings.openSettings")}</button>
+            <button type="button" onClick={() => { void openPrivacySettings("microphone"); }}>{tp("settings.openSettings", platform)}</button>
             <button type="button" onClick={recheck}>{t("onb.paste.recheck")}</button>
           </div>
         </div>
       )}
-      {status === "restricted" && <p className="error" role="alert">{t("onb.mic.restricted")}</p>}
+      {status === "restricted" && <p className="error" role="alert">{tp("onb.mic.restricted", platform)}</p>}
       {(status === "granted" || status === "notApplicable") && (
         <>
           <div className="meter" aria-hidden="true"><div style={{ width: `${String(Math.round(level * 100))}%` }} /></div>
@@ -194,6 +205,7 @@ function PasteStep({
   config,
   onConfig,
   onError,
+  platform = "",
 }: StepProps & { perm: Permissions | null; recheck: () => void; config: Config; onConfig: (c: Config) => void }) {
   const setMode = (mode: Config["delivery"]["mode"]) => {
     updateSettings(config.revision, { delivery: { mode } }).then(onConfig).catch((e: unknown) => { onError(String(e)); });
@@ -206,7 +218,7 @@ function PasteStep({
         <p>{t("onb.paste.unavailable")}</p>
       ) : (
         <>
-          <p>{t("onb.paste.body")}</p>
+          <p>{tp("onb.paste.body", platform)}</p>
           {ax === "granted" ? (
             <p role="status">{t("onb.paste.granted")}</p>
           ) : (

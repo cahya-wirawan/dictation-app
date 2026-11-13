@@ -78,6 +78,8 @@ pub struct WorkerClient {
     info: WorkerInfo,
     stderr_tail: Arc<Mutex<VecDeque<String>>>,
     model_loaded: bool,
+    /// Kills the worker if the app exits without reaping it (Windows job object).
+    _bound: crate::job::ParentBound,
 }
 
 impl WorkerClient {
@@ -93,13 +95,31 @@ impl WorkerClient {
                 "worker path must be absolute".into(),
             ));
         }
-        let mut child = Command::new(exe)
-            .stdin(Stdio::piped())
+        let mut cmd = Command::new(exe);
+        cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .env_clear()
-            .spawn()
-            .map_err(ClientError::Spawn)?;
+            .env_clear();
+        #[cfg(windows)]
+        {
+            // The app is a GUI process: never flash a console for the worker.
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+            // Windows system DLLs expect SystemRoot even in a cleared environment.
+            if let Some(root) = std::env::var_os("SystemRoot") {
+                cmd.env("SystemRoot", root);
+            }
+        }
+        let mut child = cmd.spawn().map_err(ClientError::Spawn)?;
+        let bound = match crate::job::ParentBound::attach(&child) {
+            Ok(b) => b,
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(ClientError::Spawn(e));
+            }
+        };
 
         let (Some(stdin), Some(stdout), Some(stderr)) =
             (child.stdin.take(), child.stdout.take(), child.stderr.take())
@@ -167,6 +187,7 @@ impl WorkerClient {
             },
             stderr_tail,
             model_loaded: false,
+            _bound: bound,
         };
         match client.recv(handshake_timeout)? {
             FromWorker::Hello {

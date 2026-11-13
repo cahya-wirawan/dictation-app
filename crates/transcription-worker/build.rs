@@ -5,6 +5,10 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// The vendored submodule pin (docs/IMPLEMENTATION_STATUS.md).
+const PINNED_COMMIT: &str = "d1be6fde11ac6e0407606b4e42fe72d34add8037";
+const PINNED_TAG: &str = "v1.9.5";
+
 #[allow(clippy::panic, clippy::expect_used)]
 fn main() {
     let manifest =
@@ -33,6 +37,18 @@ fn main() {
         // otherwise ld warns that objects target a newer macOS than the binary.
         let min = env::var("MACOSX_DEPLOYMENT_TARGET").unwrap_or_else(|_| "13.0".into());
         cfg.define("CMAKE_OSX_DEPLOYMENT_TARGET", &min);
+    }
+    if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        // The cmake crate replaces CMake's MSVC Release flags with its own
+        // (`CMAKE_C_FLAGS_RELEASE= -W0`), so ggml was built unoptimized:
+        // > 50 s for the 11 s fixture. Drop cc's debug-profile defaults and
+        // state the optimization explicitly. The CRT stays /MD (CMake's
+        // default), matching Rust.
+        cfg.no_default_flags(true);
+        for f in ["/O2", "/Ob2", "/DNDEBUG"] {
+            cfg.cflag(f);
+            cfg.cxxflag(f);
+        }
     }
     if native == "OFF" && target_arch == "x86_64" {
         // Portable x86 baseline = x86-64-v3 (Haswell, 2013+). Without this ggml
@@ -85,7 +101,7 @@ fn main() {
     }
     if !found.iter().any(|f| f == "whisper") {
         panic!(
-            "whisper.cpp build produced no libwhisper.a under {}",
+            "whisper.cpp build produced no whisper static library under {}",
             dst.display()
         );
     }
@@ -100,7 +116,8 @@ fn main() {
                 println!("cargo::rustc-link-lib=framework=MetalKit");
             }
         }
-        "windows" => {}
+        // ggml-cpu reads the CPU name from the registry.
+        "windows" => println!("cargo::rustc-link-lib=advapi32"),
         _ => println!("cargo::rustc-link-lib=stdc++"),
     }
 
@@ -111,14 +128,15 @@ fn main() {
         .warnings(true)
         .compile("dictation_whisper_shim");
 
-    println!(
-        "cargo::rustc-env=WHISPER_CPP_REVISION={}",
-        git(&src, &["rev-parse", "HEAD"])
-    );
-    println!(
-        "cargo::rustc-env=WHISPER_CPP_TAG={}",
-        git(&src, &["describe", "--tags", "--always"])
-    );
+    let revision = git(&src, &["rev-parse", "HEAD"]);
+    let mut tag = git(&src, &["describe", "--tags", "--always"]);
+    // Shallow CI checkouts carry no tags. Name the tag only for the exact
+    // pinned commit; any other commit keeps its bare hash.
+    if !tag.starts_with('v') && revision == PINNED_COMMIT {
+        tag = PINNED_TAG.to_owned();
+    }
+    println!("cargo::rustc-env=WHISPER_CPP_REVISION={revision}");
+    println!("cargo::rustc-env=WHISPER_CPP_TAG={tag}");
     println!("cargo::rustc-env=DICTATION_GGML_NATIVE={native}");
 }
 
@@ -129,7 +147,11 @@ fn static_libs(dir: &Path) -> Vec<String> {
     rd.filter_map(|e| e.ok())
         .filter_map(|e| {
             let name = e.file_name().into_string().ok()?;
-            let stem = name.strip_prefix("lib")?.strip_suffix(".a")?;
+            // Unix/MinGW: libNAME.a; MSVC: NAME.lib.
+            let stem = name
+                .strip_prefix("lib")
+                .and_then(|n| n.strip_suffix(".a"))
+                .or_else(|| name.strip_suffix(".lib"))?;
             Some(stem.to_owned())
         })
         .collect()

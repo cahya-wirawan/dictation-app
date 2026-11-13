@@ -45,6 +45,20 @@ pub const DEFAULT_EXCLUDED_APPS: &[&str] = &[
     "co.zeit.hyper",
     "com.github.wez.wezterm",
     "org.tabby",
+    // Windows: lower-case executable names (the Windows app identity).
+    "windowsterminal.exe",
+    "openconsole.exe",
+    "conhost.exe",
+    "cmd.exe",
+    "powershell.exe",
+    "pwsh.exe",
+    "wezterm-gui.exe",
+    "alacritty.exe",
+    "mintty.exe",
+    "putty.exe",
+    "kitty.exe",
+    "tabby.exe",
+    "hyper.exe",
 ];
 
 /// Native operations the transaction needs. `Token` may be `!Send`: a
@@ -74,11 +88,11 @@ impl TargetPlatform for NativePlatform {
     fn field(&self, t: &Self::Token) -> FieldClass {
         t.field
     }
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     fn app_id(&self, t: &Self::Token) -> Option<String> {
         t.app.bundle_id.clone()
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", windows)))]
     fn app_id(&self, t: &Self::Token) -> Option<String> {
         t.app.as_ref().and_then(|a| a.bundle_id.clone())
     }

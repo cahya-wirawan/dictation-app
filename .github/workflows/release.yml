@@ -110,4 +110,6 @@ jobs:
         run: |
           v="${GITHUB_REF_NAME#v}"
           awk -v v="$v" '$0 ~ "^## \\[" v "\\]" {on=1; next} /^## \[/ {on=0} on' CHANGELOG.md > notes.md
-          gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "Local Dictation $v" --notes-file notes.md artifacts/*/*
+          # download-artifact puts a single artifact directly in artifacts/, several in subfolders.
+          mapfile -t files < <(find artifacts -type f)
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "Local Dictation $v" --notes-file notes.md "${files[@]}"

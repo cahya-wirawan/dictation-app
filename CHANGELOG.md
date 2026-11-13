@@ -17,6 +17,20 @@ All notable changes to Local Dictation are documented here. The format follows [
 
 ## [Unreleased]
 
+### Added (M6, Windows)
+
+- **Windows adapter:** captures the foreground app and window, and the focused UI Automation element. It refuses password fields, read-only fields, terminals and apps running at a higher integrity level (administrator). Pasting is a Unicode clipboard write plus one Ctrl+V.
+- **Microphone privacy:** onboarding reads the Windows setting and links to its page, with Windows-specific text.
+- **Sleep, lock, logoff and remote disconnect** cancel the session and clear the draft.
+- **Worker:** runs in a kill-on-close job object, so it exits with the app even after a crash, and starts without a console window.
+- **Installer:** NSIS, per-user (no admin rights), with an embedded WebView2 bootstrapper.
+- **CI:** Windows build and tests, a native end-to-end paste test, and an installer test that runs inference through the installed worker.
+
+### Fixed
+
+- whisper.cpp is now built optimized with MSVC. The CMake integration had dropped `/O2`.
+- The release workflow attaches its artifacts again; v0.6.0's draft release was created by hand.
+
 ## [0.6.0] - 2026-11-12
 
 Milestone M5 (hardening and release tooling).

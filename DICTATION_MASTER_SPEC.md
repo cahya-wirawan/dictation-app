@@ -849,6 +849,18 @@ Accepted for M1, pending corpus calibration (12 November 2026, M0 T0.8). The Web
 
 Accepted (M0 T0.2). CPAL 0.18 transparently reroutes a stream opened on the *default* device when the OS route changes (`ErrorKind::DeviceChanged`). That would be a silent microphone substitution, which 11_AGENT_HANDOFF forbids. Capture therefore resolves the current default to its concrete `DeviceId` and opens that device. Disconnect, reroute or xrun is a fault that aborts the session; it never transcribes a truncated recording. Consequence: an OS default-device change during a session ends the session with MIC_DISCONNECTED, and the next session uses the new default.
 
+## ADR-012 — Windows target identity, UIPI and CPU baseline
+
+Accepted (M6). The Windows adapter (`crates/platform/src/win32.rs`) follows docs/05 §3–§4 with these concrete choices:
+
+- **Target token.** Root foreground HWND, process id plus process creation time (PID reuse), and the lower-case executable name as the app identity. The focused element is identified by its UI Automation runtime id, and it must belong to the foreground process. A changed runtime id means FieldChanged. A missing element, or one owned by another process, is Unknown.
+- **Field class.** Password elements are Secure. Disabled elements, read-only ValuePattern elements and controls that are not Edit or Document are NotEditable. Only Edit and Document controls qualify.
+- **UIPI.** SendInput into a higher-integrity process fails without an error. A target whose token integrity is above the app's, or cannot be read, is therefore Unknown and never auto-delivered. A null foreground window (secure desktop, UAC, lock screen) is not a target. The app never requests elevation.
+- **Permissions.** Windows has no Accessibility-style grant for same-integrity UIA and SendInput, so `accessibility` reports Granted. Microphone status comes from the capability consent store (machine, user, NonPackaged). There is no runtime prompt, so the app links to `ms-settings:privacy-microphone`.
+- **Worker lifetime.** The worker is assigned to a `KILL_ON_JOB_CLOSE` job object, so it dies with the app even after a crash. It is spawned with `CREATE_NO_WINDOW`, and `SystemRoot` is its only environment variable.
+- **CPU baseline.** The portable build uses x86-64-v3 (AVX2, FMA, F16C, BMI2; Haswell 2013 and later), from M0 finding 7. Older CPUs are unsupported rather than silently slow (about 11× slower without AVX2). Runtime CPU dispatch (`GGML_BACKEND_DL`) remains a later option.
+- **Installer.** NSIS, per-user (`currentUser`, no admin), with an embedded WebView2 bootstrapper. Machines without WebView2 need internet once. Windows 11 and current Windows 10 builds ship WebView2.
+
 ## Risk register
 
 | Risk | Likelihood / impact | Mitigation and owner role |

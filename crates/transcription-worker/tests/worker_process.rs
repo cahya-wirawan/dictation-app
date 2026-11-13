@@ -224,8 +224,12 @@ fn symlinked_model_is_rejected() {
     let _ = std::fs::remove_file(&link);
     #[cfg(unix)]
     std::os::unix::fs::symlink(&path, &link).unwrap();
-    #[cfg(not(unix))]
-    return;
+    // Needs admin or Developer Mode on Windows (CI runners have it).
+    #[cfg(windows)]
+    if let Err(e) = std::os::windows::fs::symlink_file(&path, &link) {
+        eprintln!("SKIP: cannot create a symlink here: {e}");
+        return;
+    }
     let mut c = WorkerClient::spawn(&worker_exe(), 8, T).unwrap();
     let r = c.load_model(&link, &sha, Duration::from_secs(30));
     assert!(

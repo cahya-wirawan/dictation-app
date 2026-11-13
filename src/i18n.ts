@@ -42,6 +42,15 @@ const en = {
   "nav.continue": "Continue",
   "nav.finish": "Done",
   "settings.openSettings": "Open System Settings",
+  // Platform variants, picked by `tp` when they exist.
+  "onb.paste.body.windows":
+    "Local Dictation pastes into the field you started in. It checks that field with Windows UI Automation and sends one Ctrl+V. It never pastes into password fields, terminals or apps running as administrator.",
+  "onb.mic.denied.windows":
+    "Microphone access for desktop apps is turned off in Windows Settings → Privacy & security → Microphone.",
+  "onb.mic.restricted.windows": "Microphone access is blocked by a policy on this PC.",
+  "onb.done.body.windows": "Local Dictation lives in the notification area of the taskbar. Use the shortcut from any app.",
+  "onb.done.body.linux": "Local Dictation lives in the system tray if your desktop shows one; you can also start dictating from this window.",
+  "settings.openSettings.windows": "Open Windows Settings",
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -57,4 +66,10 @@ export function setLocale(l: string): void {
 
 export function t(key: MessageKey): string {
   return catalogs[locale]?.[key] ?? en[key];
+}
+
+/** `key` with a platform variant (`<key>.windows`, `<key>.linux`) when one exists. */
+export function tp(key: MessageKey, platform: string): string {
+  const variant = `${key}.${platform}`;
+  return variant in en ? t(variant as MessageKey) : t(key);
 }

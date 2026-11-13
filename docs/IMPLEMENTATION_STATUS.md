@@ -1,6 +1,6 @@
 # Implementation status
 
-Last updated: 12 November 2026 · **M0 partially complete · M1–M5 implemented, native GUI run and release credentials pending** · Version 0.6.0
+Last updated: 13 November 2026 · **M0 partially complete · M1–M6 implemented, native GUI runs and release credentials pending** · Version 0.6.0
 
 **M0 is not done.** Its exit evidence must come from a macOS Apple Silicon release-like build (docs/07 §2), and no Mac has run this code yet. This round ran on a headless Linux host. Everything that can be proven without a display, microphone or macOS is proven below. Everything else is written but marked **unverified**.
 
@@ -53,6 +53,38 @@ The Tauri crate compiles and links on macOS, and the bundle layout is correct.
 | eslint / typescript-eslint | 10.14.0 / 8.72.2 | `strictTypeChecked` |
 
 Lockfiles: `Cargo.lock`, `pnpm-lock.yaml`.
+
+## M6: Windows
+
+The exit evidence is "separate Windows release evidence" (docs/07 §2). **Partially met.** Everything below comes from GitHub-hosted `windows-2025` runners: no physical Windows machine, no signing, and no supported-app qualification. Design decisions are in ADR-012; user-facing limits are in `docs/PLATFORM_SUPPORT.md` → Windows.
+
+| Item | Where | Evidence |
+|---|---|---|
+| **Target identity** | `crates/platform/src/win32.rs` | **Captured:** root foreground HWND; pid with process creation time; lower-case exe name; the UI Automation focused element (runtime id, control type, password, enabled, read-only ValuePattern), which must belong to the foreground process. **UIPI:** a target at higher or unreadable integrity is Unknown. A null foreground window (secure desktop) is not a target. |
+| **Clipboard and paste** | same | **Clipboard:** `CF_UNICODETEXT`, with opening retried for up to 500 ms. **Paste:** one `SendInput` Ctrl+V; a partial submission is Uncertain and releases only the synthetic keys. **Modifiers:** `GetAsyncKeyState`. |
+| **Native end-to-end test** | `win32.rs` tests (`--ignored`, CI step) | Real Edit controls on the runner's desktop. Unicode (umlauts, em dash, emoji, CJK) goes through the real clipboard and one real Ctrl+V, and is read back from the control and through UIA. The own app is never a target, a field switch inside the window changes the runtime id, and a password field is Secure. **Result:** passes on the `windows-2025` runner (CI run 43355765924). `RECEIVED=true DUPLICATED=false` with the exact text `Grüße — naïve café, 😀 漢字 ok`; the UIA readback matches; the second field stays empty. |
+| **Session watch** | `watch_suspend` | A hidden top-level window on its own thread: `WTSRegisterSessionNotification` (lock, logoff, console/remote disconnect), `PBT_APMSUSPEND`, end-session. The test checks that it starts and stops; the events themselves were not fired. |
+| **Permissions** | `permission_status`, `open_privacy_settings` | Microphone status comes from the consent store (machine, user, NonPackaged) and the app links to `ms-settings:privacy-microphone`. Accessibility reports Granted because Windows needs no grant at equal integrity. Onboarding text is platform-specific. |
+| **Worker** | `crates/transcription-protocol/src/job.rs`, `client.rs`, worker `main.rs`, `build.rs` | **Lifetime:** a `KILL_ON_JOB_CLOSE` job object, tested by killing a child through job close. **Spawn:** `CREATE_NO_WINDOW`, with only `SystemRoot` kept. **Model open:** reparse-point-safe, checked on the opened handle. **Build:** MSVC static-lib discovery, `advapi32`. |
+| **Installer** | CI `windows-installer`, `scripts/verify-windows-installer.sh` | NSIS installer, per-user (`currentUser`), with an embedded WebView2 bootstrapper. It is installed silently as the runner user, the installed worker transcribes the JFK fixture, and it is uninstalled. **Result (CI run 43370896636):** a 6.1 MB `Local Dictation_0.6.0_x64-setup.exe`. The silent install takes 2 s to `%LOCALAPPDATA%\Local Dictation` (`dictation-app.exe`, `dictation-worker.exe`, `THIRD_PARTY_NOTICES.md`, `uninstall.exe`) with no elevation prompt; WebView2 156 was already present. The installed release worker gives JFK median 2.9 s (RTF 0.26), normalized WER 0%; cold start median 3.2 s, model load 305 ms. The uninstall removes the program files. The bench does not read process RSS on Windows, so its "0 MiB" peak means *not measured*. |
+
+### M6 findings
+
+1. **On MSVC, whisper.cpp was compiled without optimization.** The `cmake` crate replaces CMake's MSVC `CMAKE_C_FLAGS_RELEASE` with ` -W0`, which drops `/O2 /Ob2 /DNDEBUG`. The 11 s fixture took over 50 s per job even in a release build, and the real-worker tests timed out. `build.rs` now passes the flags explicitly for MSVC. GCC and Clang were not affected: their cache keeps `-O3 -DNDEBUG`.
+2. **Shallow CI checkouts carry no submodule tags.** The worker reported a bare hash instead of `v1.9.5`. `build.rs` now names the tag only when HEAD is the pinned commit.
+3. **Windows worker timing after the fix** (`windows-2025` runner, portable x86-64-v3, debug Rust with Release ggml): model load 378–393 ms (including the verified-hash read); 11 s fixture warm 3.9–4.3 s (RTF ≈ 0.36); exact transcript, auto-detected `en`.
+4. **The test rig, not the app, hung the first native e2e runs.** There were two causes:
+   - The test thread owned the Edit controls and also queried UIA. UIA calls are answered by the window-owning thread, so it blocked on itself. The test now queries from another thread while the window thread pumps. The app is not affected: it queries from the delivery thread, which owns no windows, and its targets belong to other processes.
+   - A synthetic Alt tap, used to satisfy the foreground-lock rule, made `DefWindowProc` enter modal menu mode (`SC_KEYMENU`) inside `DispatchMessage`. A Shift tap satisfies the rule without that.
+   The test now has stage markers and a 120 s watchdog.
+5. **Git Bash rewrites POSIX-looking arguments for native programs.** `setup.exe /S` reached NSIS as a drive path, so the installer waited in its GUI until the job timeout. The verifier sets `MSYS_NO_PATHCONV=1` and bounds every phase.
+6. **The GitHub `windows-2025` runner reports 2 logical CPUs** (`nproc`), so its timings are not comparable with the docs/08 reference hardware.
+
+**Not done in M6:**
+
+- The supported-app matrix (Notepad, a browser textarea, Word, VS Code) and testing as a standard (non-admin) user on a real machine. The runner account is an administrator.
+- Narrator smoke test, Authenticode signing, SmartScreen reputation.
+- Windows trigger latency, RSS and idle CPU on reference hardware.
 
 ## M5: hardening and release tooling
 
