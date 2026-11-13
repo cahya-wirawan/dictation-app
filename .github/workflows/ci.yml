@@ -210,7 +210,7 @@ jobs:
           retention-days: 7
 
   macos-bundle:
-    name: macOS app bundle (ad-hoc signed)
+    name: macOS universal app bundle (ad-hoc signed)
     needs: rust
     runs-on: macos-26
     timeout-minutes: 60
@@ -229,18 +229,41 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Stage release worker (portable CPU build)
-        run: PROFILE=release ./scripts/stage-worker.sh
-      - name: Build .app + DMG (ad-hoc signed, hardened runtime)
+      - name: Stage universal release worker (arm64 + x86_64, portable CPU build)
+        run: TARGET=universal-apple-darwin PROFILE=release ./scripts/stage-worker.sh
+      - name: Build universal .app + DMG (ad-hoc signed, hardened runtime)
         env:
           CI: "true"
-        run: pnpm tauri build --bundles app,dmg
-      - name: Verify bundle, signature, hardened runtime and entitlements
-        run: ./scripts/verify-macos-bundle.sh "target/release/bundle/macos/Local Dictation.app" | tee -a "$GITHUB_STEP_SUMMARY"
+        run: pnpm tauri build --target universal-apple-darwin --bundles app,dmg
+      - name: Verify bundle, architectures, signature, hardened runtime and entitlements
+        env:
+          EXPECT_ARCHS: arm64 x86_64
+        run: ./scripts/verify-macos-bundle.sh "target/universal-apple-darwin/release/bundle/macos/Local Dictation.app" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Model cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .models/ggml-base.bin
+          key: whisper-ggml-base-60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe
+      - name: Both worker slices transcribe (x86_64 under Rosetta 2, needs macOS 15+)
+        run: |
+          sudo softwareupdate --install-rosetta --agree-to-license >/dev/null 2>&1 || true
+          ./scripts/fetch-model.sh
+          w="target/universal-apple-darwin/release/bundle/macos/Local Dictation.app/Contents/MacOS/dictation-worker"
+          cargo build --release -p dictation-bench
+          # Each slice on its own: x86_64 runs under Rosetta 2.
+          for a in arm64 x86_64; do
+            lipo -thin "$a" "$w" -output "$RUNNER_TEMP/worker-$a"
+            echo "### Worker slice $a" >> "$GITHUB_STEP_SUMMARY"
+            out=$(./target/release/dictation-bench corpus --worker "$RUNNER_TEMP/worker-$a" \
+              --model .models/ggml-base.bin --sha 60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe \
+              --manifest crates/bench/corpus/jfk.tsv --trials 3 --cold 1)
+            echo "$out" | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "$out" | grep -q '| jfk.wav | en |' || { echo "::error::$a slice did not transcribe"; exit 1; }
+          done
       - name: Zip bundle
-        run: ditto -c -k --keepParent "target/release/bundle/macos/Local Dictation.app" LocalDictation-macos-arm64-adhoc.zip
+        run: ditto -c -k --keepParent "target/universal-apple-darwin/release/bundle/macos/Local Dictation.app" LocalDictation-macos-universal-adhoc.zip
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: LocalDictation-macos-arm64-adhoc
-          path: LocalDictation-macos-arm64-adhoc.zip
+          name: LocalDictation-macos-universal-adhoc
+          path: LocalDictation-macos-universal-adhoc.zip
           retention-days: 7

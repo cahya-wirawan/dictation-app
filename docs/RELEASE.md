@@ -14,7 +14,7 @@ Pushing the tag starts `.github/workflows/release.yml`:
 
 1. **Consistency checks.** The version agrees across Cargo, npm, Tauri and the changelog, and the tag matches it. `pnpm notices:check` passes: notices are current and every shipped component has an allowed license.
 2. **Worker.** The release worker is built with `DICTATION_GGML_NATIVE=OFF`, which means portable CPU code plus Accelerate.
-3. **App and DMG.** `tauri build --bundles app,dmg` with the hardened runtime and `src-tauri/Entitlements.plist`, which grants audio input only.
+3. **App and DMG.** Universal (arm64 + x86_64, ADR-013): `TARGET=universal-apple-darwin ./scripts/stage-worker.sh`, then `tauri build --target universal-apple-darwin --bundles app,dmg`, with the hardened runtime and `src-tauri/Entitlements.plist`, which grants audio input only.
    - **With signing secrets:** the app is Developer ID signed, then notarized and stapled.
    - **Without them:** it is ad-hoc signed, and the job warns that the result is not for distribution.
 4. **Bundle check.** `scripts/verify-macos-bundle.sh` checks:

@@ -54,6 +54,24 @@ The Tauri crate compiles and links on macOS, and the bundle layout is correct.
 
 Lockfiles: `Cargo.lock`, `pnpm-lock.yaml`.
 
+## Universal macOS build (after M7, ADR-013)
+
+The macOS DMG is universal: arm64 + x86_64.
+
+- **Build:** `TARGET=universal-apple-darwin ./scripts/stage-worker.sh` builds the worker per architecture. It stages both thin slices, which Tauri's per-architecture app builds require, and the `lipo`'d fat sidecar. Then `tauri build --target universal-apple-darwin` builds the app.
+- **Verified on the M2 Pro (macOS 26.6.2, load average about 25):**
+  - `Local Dictation_0.8.0_universal.dmg` is 13.1 MiB, against 6.2 MiB for arm64 only.
+  - `verify-macos-bundle.sh` with `EXPECT_ARCHS="arm64 x86_64"` passes: app and worker are both `x86_64 arm64`, `adhoc,runtime`, audio-input only.
+- **Each worker slice extracted from the bundle (`lipo -thin`) on JFK:**
+
+| Slice | Warm median | RTF | Cold start | Model load | WER norm |
+|---|---:|---:|---:|---:|---:|
+| arm64 (native) | 585 ms | 0.053 | 542 ms | 148 ms | 0.0% |
+| x86_64 (Rosetta 2) | 1581 ms | 0.144 | 2366 ms | 751 ms | 0.0% |
+
+- **Rosetta proves correctness, not Intel speed.** Rosetta translates AVX2 only from macOS 15, so this check needs a macOS 15+ host; CI uses `macos-26`. Apple Silicon Macs always run the arm64 slice.
+- **Not done:** qualification and timing on a real Intel Mac.
+
 ## M7: Linux experiments
 
 The exit criterion is a "published limited support matrix; no broad support claim" (docs/07 §2). **Met**, in `docs/PLATFORM_SUPPORT.md` → Linux. No physical Linux desktop was available, so no desktop or compositor is named as supported.

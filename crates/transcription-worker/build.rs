@@ -37,6 +37,15 @@ fn main() {
         // otherwise ld warns that objects target a newer macOS than the binary.
         let min = env::var("MACOSX_DEPLOYMENT_TARGET").unwrap_or_else(|_| "13.0".into());
         cfg.define("CMAKE_OSX_DEPLOYMENT_TARGET", &min);
+        // One architecture per build; the universal worker is two builds
+        // joined with lipo (scripts/stage-worker.sh). Explicit so an x86_64
+        // build on an Apple Silicon host never inherits the host arch.
+        let arch = if target_arch == "aarch64" {
+            "arm64"
+        } else {
+            target_arch.as_str()
+        };
+        cfg.define("CMAKE_OSX_ARCHITECTURES", arch);
     }
     if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
         // The cmake crate replaces CMake's MSVC Release flags with its own
