@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 const MAX_EXCLUDED_APPS: usize = 64;
 const MAX_STRING: usize = 256;
 
@@ -32,6 +32,9 @@ pub struct AudioConfig {
     pub silence_ms: u32,
     pub no_speech_timeout_ms: u32,
     pub max_capture_ms: u32,
+    /// Schema v3. Continuous dictation (ADR-014): keep listening after each
+    /// phrase and paste every phrase. Requires automatic paste.
+    pub continuous: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -105,6 +108,7 @@ impl Default for Config {
                 silence_ms: 1000,
                 no_speech_timeout_ms: 8000,
                 max_capture_ms: 120_000,
+                continuous: false,
             },
             transcription: TranscriptionConfig {
                 model_id: "whisper-base-multilingual".into(),
@@ -289,6 +293,7 @@ fn migrate(mut value: Value, from: u32) -> Result<Value, ConfigError> {
     while version < SCHEMA_VERSION {
         value = match version {
             1 => v1_to_v2(value)?,
+            2 => v2_to_v3(value)?,
             other => {
                 return Err(ConfigError::Corrupt(format!(
                     "unknown schema_version {other}"
@@ -311,6 +316,17 @@ fn v1_to_v2(mut v: Value) -> Result<Value, ConfigError> {
         .or_insert(Value::Bool(false));
     ui.entry("reduced_motion").or_insert(Value::Bool(false));
     v["schema_version"] = Value::from(2u32);
+    Ok(v)
+}
+
+/// v3 adds `audio.continuous` (off: the v2 behavior).
+fn v2_to_v3(mut v: Value) -> Result<Value, ConfigError> {
+    let audio = v
+        .get_mut("audio")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| ConfigError::Corrupt("v2 config without audio".into()))?;
+    audio.entry("continuous").or_insert(Value::Bool(false));
+    v["schema_version"] = Value::from(3u32);
     Ok(v)
 }
 
@@ -461,8 +477,8 @@ mod tests {
     #[test]
     fn future_and_corrupt_schemas() {
         assert_eq!(
-            Config::from_json(r#"{"schema_version": 3}"#),
-            Err(ConfigError::FutureSchema(3))
+            Config::from_json(r#"{"schema_version": 4}"#),
+            Err(ConfigError::FutureSchema(4))
         );
         assert!(matches!(
             Config::from_json("{not json"),
@@ -481,7 +497,7 @@ mod tests {
     }
 
     #[test]
-    fn migrates_v1_to_v2() {
+    fn migrates_v1_to_current() {
         let v1 = r#"{"schema_version":1,"revision":7,
             "audio":{"device_id":"coreaudio:mic","silence_ms":1500,"no_speech_timeout_ms":8000,"max_capture_ms":120000},
             "transcription":{"model_id":"whisper-base-multilingual","language":"de","backend":"auto"},
@@ -489,8 +505,9 @@ mod tests {
             "shortcuts":{"toggle":"Ctrl+Alt+Space","cancel":"Ctrl+Alt+Escape","paste_draft":null},
             "ui":{"show_hud":false,"launch_at_login":false,"locale":"en"}}"#;
         let c = Config::from_json(v1).unwrap();
-        assert_eq!(c.schema_version, 2);
+        assert_eq!(c.schema_version, 3);
         assert_eq!(c.revision, 7, "migration keeps the revision");
+        assert!(!c.audio.continuous);
         assert_eq!(
             (c.audio.silence_ms, c.transcription.language.as_str()),
             (1500, "de")
@@ -500,6 +517,25 @@ mod tests {
         assert!(!c.ui.onboarding_complete && !c.ui.reduced_motion);
         assert!(matches!(
             Config::from_json(r#"{"schema_version":1,"revision":1}"#),
+            Err(ConfigError::Corrupt(_))
+        ));
+    }
+
+    #[test]
+    fn migrates_v2_to_v3_and_patches_continuous() {
+        let mut v2: Value = serde_json::from_str(&Config::default().to_json()).unwrap();
+        v2["schema_version"] = json!(2);
+        v2["revision"] = json!(4);
+        v2["audio"].as_object_mut().unwrap().remove("continuous");
+        let c = Config::from_json(&v2.to_string()).unwrap();
+        assert_eq!((c.schema_version, c.revision), (3, 4));
+        assert!(!c.audio.continuous, "upgrades keep the previous behavior");
+        let c = c
+            .apply_patch(4, &json!({"audio": {"continuous": true}}))
+            .unwrap();
+        assert!(c.audio.continuous);
+        assert!(matches!(
+            Config::from_json(r#"{"schema_version":2,"revision":1}"#),
             Err(ConfigError::Corrupt(_))
         ));
     }

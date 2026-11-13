@@ -263,6 +263,17 @@ function Recording({ cfg, patch, onError }: PageProps) {
         <input type="range" min={3000} max={15000} step={1000} value={cfg.audio.no_speech_timeout_ms}
           onChange={(e) => { patch({ audio: { no_speech_timeout_ms: Number(e.target.value) } }); }} />
       </label>
+      <label className="check">
+        <input type="checkbox" checked={cfg.audio.continuous} aria-describedby="continuous-hint"
+          onChange={(e) => { patch({ audio: { continuous: e.target.checked } }); }} />
+        Continuous dictation: keep listening after each phrase
+      </label>
+      <p className="hint" id="continuous-hint">
+        Each phrase is pasted when you pause, into the same text field, while the microphone stays on.
+        Press the shortcut again to stop, or stay silent for the time above. Switching to another field
+        or app ends it and keeps that phrase as text to review.
+        {cfg.delivery.mode !== "auto_paste" && " Requires automatic paste (Delivery page)."}
+      </p>
       <p className="hint">Changes apply to the next recording.</p>
     </div>
   );

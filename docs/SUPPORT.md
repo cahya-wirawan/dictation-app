@@ -32,6 +32,7 @@ Use **Test microphone** to see the input level. The test turns the microphone of
 - Pressing the shortcut again finishes dictation immediately.
 - **Cancel** (default **Ctrl+Option+Escape**) discards the recording without transcribing it.
 - One dictation is capped at **120 s**.
+- **Continuous dictation** (Settings → Recording) keeps listening after each phrase: every pause pastes what you just said into the same field, and the microphone stays on. Press the shortcut again to stop, or stay silent for the "give up" time. If you switch to another field or app, the current phrase becomes a draft and listening stops. It needs automatic paste, and in this mode the 120 s cap applies to each phrase.
 
 ## Permissions (macOS)
 

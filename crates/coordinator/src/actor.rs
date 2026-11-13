@@ -40,9 +40,19 @@ pub enum AdapterEvent {
         generation: Generation,
     },
     /// Microphone closed; `pcm` is present only for accepted speech.
+    /// `segment` numbers the utterances of one capture, starting at 0.
     CaptureFinished {
         id: SessionId,
         generation: Generation,
+        segment: u32,
+        outcome: CaptureOutcome,
+        pcm: Option<Vec<f32>>,
+    },
+    /// Continuous capture: one utterance ended, the microphone stays open.
+    CaptureSegment {
+        id: SessionId,
+        generation: Generation,
+        segment: u32,
         outcome: CaptureOutcome,
         pcm: Option<Vec<f32>>,
     },
@@ -91,11 +101,13 @@ pub enum AdapterEvent {
 
 /// Opens and closes the microphone. Exactly one terminal event
 /// (`CaptureFinished`/`CaptureFailed`/`CaptureAborted`) per successful `open`.
+/// With `continuous`, `CaptureSegment`s report utterances before it.
 pub trait CaptureAdapter: Send {
     fn open(
         &mut self,
         id: SessionId,
         generation: Generation,
+        continuous: bool,
         events: Sender<Msg>,
     ) -> Result<(), AppError>;
     fn finish(&mut self, id: SessionId);
@@ -173,6 +185,8 @@ pub enum Command {
     Suspend,
     /// Whether automatic delivery is allowed for the next session (config).
     SetAutoDelivery(bool),
+    /// Continuous dictation for the next session (config, ADR-014).
+    SetContinuous(bool),
     /// Readiness for new sessions (model installed, worker up, …).
     SetReady(Result<(), AppError>),
     /// Activate another model; only while no session is in flight.
@@ -214,6 +228,8 @@ pub struct Snapshot {
     /// True while the microphone is open (for "no idle capture" checks).
     pub capture_open: bool,
     pub switching_model: bool,
+    /// A continuous dictation session is live.
+    pub continuous: bool,
 }
 
 pub struct Adapters {
@@ -295,9 +311,10 @@ struct Actor {
     started: Instant,
     /// Session whose microphone is open (until its terminal capture event).
     capture_open: Option<(SessionId, Generation)>,
-    /// Accepted utterances awaiting `StartTranscription`.
-    pcm: HashMap<(SessionId, Generation), Vec<f32>>,
+    /// Accepted utterances awaiting `StartTranscription`, by capture segment.
+    pcm: HashMap<(SessionId, u32), Vec<f32>>,
     auto_delivery: bool,
+    continuous: bool,
     ready: Result<(), AppError>,
     /// Follow-up inputs produced while executing effects. Processed only after
     /// every effect of the current input, so notifications stay in order.
@@ -317,6 +334,7 @@ impl Actor {
             capture_open: None,
             pcm: HashMap::new(),
             auto_delivery: true,
+            continuous: false,
             ready: Ok(()),
             queue: VecDeque::new(),
             stepping: false,
@@ -358,7 +376,9 @@ impl Actor {
             }
             Command::Toggle => match self.machine.phase() {
                 Phase::Idle | Phase::DraftReady => self.start(),
-                Phase::Starting | Phase::Listening => {
+                // Transcribing/Delivering: a continuous session stops
+                // listening after the phrase in flight; otherwise Busy.
+                Phase::Starting | Phase::Listening | Phase::Transcribing | Phase::Delivering => {
                     if let Some((id, _)) = self.machine.live_session() {
                         self.step(Input::Stop { id });
                     }
@@ -390,6 +410,7 @@ impl Actor {
             }
             Command::Suspend => self.step(Input::Suspend),
             Command::SetAutoDelivery(on) => self.auto_delivery = on,
+            Command::SetContinuous(on) => self.continuous = on,
             Command::SetReady(r) => self.ready = r,
             Command::SwitchModel { model, reply } => {
                 if self.switching.is_some()
@@ -427,6 +448,7 @@ impl Actor {
                     worker_epoch: self.machine.worker_epoch(),
                     capture_open: self.capture_open.is_some(),
                     switching_model: self.switching.is_some(),
+                    continuous: self.machine.continuous(),
                 });
             }
             Command::GetDraft(reply) => {
@@ -457,6 +479,7 @@ impl Actor {
             now_ms,
             ready: self.ready,
             auto_delivery: auto,
+            continuous: self.continuous,
         });
         if self.machine.live_session().map(|(s, _)| s) != Some(id) {
             self.a.delivery.release(id); // rejected start: drop the token
@@ -478,25 +501,35 @@ impl Actor {
             AdapterEvent::CaptureFinished {
                 id,
                 generation,
+                segment,
                 outcome,
                 pcm,
             } => {
+                self.hold_audio(id, generation, segment, outcome, pcm);
                 self.capture_closed(id, generation);
-                if let Some(pcm) = pcm
-                    && outcome == CaptureOutcome::Speech
-                    && self.machine.live_session() == Some((id, generation))
-                {
-                    self.pcm.insert((id, generation), pcm);
-                }
                 self.step(Input::CaptureFinished {
                     id,
                     generation,
+                    segment,
                     outcome,
                 });
-                // Audio that the reducer did not accept is released at once.
-                if self.machine.phase() != Phase::Transcribing {
-                    self.pcm.remove(&(id, generation));
-                }
+                self.release_unqueued(id, segment);
+            }
+            AdapterEvent::CaptureSegment {
+                id,
+                generation,
+                segment,
+                outcome,
+                pcm,
+            } => {
+                self.hold_audio(id, generation, segment, outcome, pcm);
+                self.step(Input::CaptureSegment {
+                    id,
+                    generation,
+                    segment,
+                    outcome,
+                });
+                self.release_unqueued(id, segment);
             }
             AdapterEvent::CaptureFailed {
                 id,
@@ -553,6 +586,30 @@ impl Actor {
         }
     }
 
+    /// Keeps accepted speech of the live capture until the reducer decides.
+    fn hold_audio(
+        &mut self,
+        id: SessionId,
+        generation: Generation,
+        segment: u32,
+        outcome: CaptureOutcome,
+        pcm: Option<Vec<f32>>,
+    ) {
+        if let Some(pcm) = pcm
+            && outcome == CaptureOutcome::Speech
+            && self.machine.capture_session() == Some((id, generation))
+        {
+            self.pcm.insert((id, segment), pcm);
+        }
+    }
+
+    /// Audio the reducer neither transcribed nor queued is released at once.
+    fn release_unqueued(&mut self, id: SessionId, segment: u32) {
+        if !self.machine.is_queued(id, segment) {
+            self.pcm.remove(&(id, segment));
+        }
+    }
+
     fn capture_closed(&mut self, id: SessionId, generation: Generation) {
         if self.capture_open == Some((id, generation)) {
             self.capture_open = None;
@@ -589,8 +646,16 @@ impl Actor {
 
     fn execute(&mut self, e: Effect) {
         match e {
-            Effect::OpenCapture { id, generation } => {
-                match self.a.capture.open(id, generation, self.tx.clone()) {
+            Effect::OpenCapture {
+                id,
+                generation,
+                continuous,
+            } => {
+                match self
+                    .a
+                    .capture
+                    .open(id, generation, continuous, self.tx.clone())
+                {
                     Ok(()) => {
                         self.capture_open = Some((id, generation));
                         self.step(Input::CaptureOpened { id, generation });
@@ -608,8 +673,8 @@ impl Actor {
                     self.a.capture.abort(id);
                 }
             }
-            Effect::StartTranscription { job } => {
-                match self.pcm.remove(&(job.session, job.generation)) {
+            Effect::StartTranscription { job, segment } => {
+                match self.pcm.remove(&(job.session, segment)) {
                     Some(pcm) => self.a.transcriber.start(job, pcm, self.tx.clone()),
                     None => self.step(Input::TranscriptionFailed {
                         job,

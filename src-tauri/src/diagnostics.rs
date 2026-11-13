@@ -47,6 +47,7 @@ fn build(app: &AppHandle, state: &AppState) -> Report {
             custom_input_device: cfg.audio.device_id.is_some(),
             excluded_app_count: cfg.delivery.excluded_apps.len(),
             show_hud: cfg.ui.show_hud,
+            continuous: cfg.audio.continuous,
         },
     })
 }

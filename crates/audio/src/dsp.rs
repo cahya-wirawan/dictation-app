@@ -4,7 +4,9 @@
 //! Ordering guarantee: the source (microphone) is closed *before* any terminal
 //! event (`Finished`, `Fault`, `Aborted`) is emitted, so inference never runs
 //! with the microphone open and a fault never yields a silently truncated
-//! utterance.
+//! utterance. The exception is continuous dictation (ADR-014): there a
+//! [`DspEvent::Segment`] reports each finished utterance while the microphone
+//! stays open for the next one; the terminal events keep the guarantee.
 
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread::{self, JoinHandle};
@@ -50,6 +52,9 @@ pub enum DspEvent {
     Level(f32),
     /// Confirmed speech onset (emitted once).
     Onset,
+    /// Continuous mode only: one utterance ended; the microphone stays open.
+    /// Never `NoSpeech` (the no-speech timeout is terminal).
+    Segment(Outcome),
     /// Terminal: endpoint, cap or explicit stop. Microphone already closed.
     Finished(Outcome),
     /// Terminal: device/format/overflow failure. Microphone already closed.
@@ -77,17 +82,34 @@ pub struct DspSession {
 
 impl DspSession {
     pub fn spawn<F>(
+        source: Box<dyn AudioSource>,
+        detector: Box<dyn SpeechDetector>,
+        cfg: EndpointConfig,
+        poll: Duration,
+        sink: F,
+    ) -> Result<Self, DspFault>
+    where
+        F: FnMut(DspEvent) + Send + 'static,
+    {
+        Self::spawn_with(source, detector, cfg, poll, false, sink)
+    }
+
+    /// Like [`DspSession::spawn`]; `segmenting` selects continuous dictation.
+    pub fn spawn_with<F>(
         mut source: Box<dyn AudioSource>,
         detector: Box<dyn SpeechDetector>,
         cfg: EndpointConfig,
         poll: Duration,
+        segmenting: bool,
         mut sink: F,
     ) -> Result<Self, DspFault>
     where
         F: FnMut(DspEvent) + Send + 'static,
     {
         let f = source.format();
-        let mut pipeline = match Pipeline::new(f.sample_rate, f.channels, detector, cfg) {
+        let pipeline = Pipeline::new(f.sample_rate, f.channels, detector, cfg)
+            .map(|p| if segmenting { p.segmenting() } else { p });
+        let mut pipeline = match pipeline {
             Ok(p) => p,
             Err(_) => {
                 source.close();
@@ -165,6 +187,9 @@ fn run(
         } else {
             pipeline.push(&buf)
         };
+        for seg in pipeline.take_segments() {
+            sink(DspEvent::Segment(seg));
+        }
         match pushed {
             Ok(Some(outcome)) => {
                 source.close();
@@ -201,13 +226,23 @@ fn run(
                 sink(DspEvent::Fault(DspFault::InvalidAudio));
                 return;
             }
-            if !buf.is_empty()
-                && let Ok(Some(outcome)) = pipeline.push(&buf)
-            {
+            let pushed = if buf.is_empty() {
+                Ok(None)
+            } else {
+                pipeline.push(&buf)
+            };
+            for seg in pipeline.take_segments() {
+                sink(DspEvent::Segment(seg));
+            }
+            if let Ok(Some(outcome)) = pushed {
                 sink(DspEvent::Finished(outcome));
                 return;
             }
-            match pipeline.stop() {
+            let last = pipeline.stop();
+            for seg in pipeline.take_segments() {
+                sink(DspEvent::Segment(seg));
+            }
+            match last {
                 Ok(o) => sink(DspEvent::Finished(o)),
                 Err(_) => sink(DspEvent::Fault(DspFault::InvalidAudio)),
             }

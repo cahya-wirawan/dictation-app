@@ -220,8 +220,12 @@ struct Rig {
 
 impl Rig {
     fn new(world: World, worker_delay: Duration) -> Self {
+        Self::with_audio(world, worker_delay, speech())
+    }
+
+    fn with_audio(world: World, worker_delay: Duration, audio: Vec<f32>) -> Self {
         let world = Arc::new(Mutex::new(world));
-        let data = Arc::new(speech());
+        let data = Arc::new(audio);
         let (otx, outcomes) = mpsc::channel();
         let (ptx, phases) = mpsc::channel();
         let excluded: SharedExclusions = Arc::new(Mutex::new(vec![]));
@@ -605,4 +609,98 @@ fn many_sessions_never_double_dispatch() {
         (9..=12).contains(&sent),
         "{sent} pastes for 12 sessions with 3 cancels"
     );
+}
+
+// ---------- continuous dictation (ADR-014) ----------
+
+/// Two utterances separated by a pause, then silence past the no-speech
+/// timeout (the fake microphone delivers audio much faster than real time).
+fn two_phrases_then_silence() -> Vec<f32> {
+    let mut v = speech();
+    v.extend(speech());
+    v.extend(vec![0.0; 16_000 * 9]);
+    v
+}
+
+#[test]
+fn continuous_pastes_every_phrase_into_the_same_target_then_stops_on_silence() {
+    // The worker is slower than the audio: phrase 2 queues behind phrase 1.
+    let r = Rig::with_audio(
+        World::default(),
+        Duration::from_millis(300),
+        two_phrases_then_silence(),
+    );
+    r.h.send(Command::SetContinuous(true));
+    r.h.send(Command::Toggle);
+    assert_eq!(r.outcome(), Outcome::PasteSent);
+    assert_eq!(r.outcome(), Outcome::PasteSent);
+    r.wait_phase(Phase::Idle);
+    assert_eq!(
+        r.pastes(),
+        vec![(T1, Some(TEXT.into())), (T1, Some(TEXT.into()))],
+        "one paste per phrase, both into the original target"
+    );
+    let snap = r.h.snapshot(T).unwrap();
+    assert!(
+        !snap.capture_open && !snap.continuous,
+        "microphone closed at the end"
+    );
+    assert!(
+        r.outcomes.recv_timeout(Duration::from_millis(300)).is_err(),
+        "no 'no speech' banner after pasted phrases"
+    );
+}
+
+#[test]
+fn continuous_keeps_listening_until_the_shortcut_is_pressed_again() {
+    let r = Rig::new(World::default(), Duration::from_millis(10));
+    r.h.send(Command::SetContinuous(true));
+    r.h.send(Command::Toggle);
+    assert_eq!(r.outcome(), Outcome::PasteSent);
+    r.wait_phase(Phase::Listening);
+    let snap = r.h.snapshot(T).unwrap();
+    assert!(
+        snap.capture_open && snap.continuous,
+        "still listening after the paste"
+    );
+    r.h.send(Command::Toggle);
+    r.wait_phase(Phase::Idle);
+    assert_eq!(r.pastes().len(), 1);
+    assert!(!r.h.snapshot(T).unwrap().capture_open);
+}
+
+#[test]
+fn continuous_focus_change_turns_the_next_phrase_into_a_draft_and_closes_the_mic() {
+    let r = Rig::with_audio(
+        World::default(),
+        Duration::from_millis(10),
+        two_phrases_then_silence(),
+    );
+    r.h.send(Command::SetContinuous(true));
+    r.h.send(Command::Toggle);
+    assert_eq!(r.outcome(), Outcome::PasteSent);
+    r.world.lock().unwrap().focus = Target { app: 2, field: 1 };
+    assert_eq!(
+        r.outcome(),
+        Outcome::DraftReady(DraftReason::Blocked(AppError::TargetChanged))
+    );
+    assert_eq!(r.pastes().len(), 1, "nothing pasted into the other app");
+    assert_eq!(r.h.draft(T).unwrap().text, TEXT);
+    let deadline = Instant::now() + T;
+    while r.h.snapshot(T).unwrap().capture_open {
+        assert!(Instant::now() < deadline, "microphone never closed");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(r.h.snapshot(T).unwrap().phase, Phase::DraftReady);
+}
+
+#[test]
+fn continuous_is_ignored_in_copy_only_mode() {
+    let r = Rig::new(World::default(), Duration::from_millis(10));
+    r.h.send(Command::SetContinuous(true));
+    r.h.send(Command::SetAutoDelivery(false));
+    r.h.send(Command::Toggle);
+    assert_eq!(r.outcome(), Outcome::DraftReady(DraftReason::ReviewMode));
+    assert!(r.pastes().is_empty());
+    assert!(!r.h.snapshot(T).unwrap().capture_open);
 }

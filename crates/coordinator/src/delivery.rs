@@ -319,7 +319,10 @@ fn run<P: TargetPlatform>(
                     Ok(DispatchOutcome::Sent) => DispatchResult::Sent,
                     Ok(DispatchOutcome::Uncertain) | Err(_) => DispatchResult::Uncertain,
                 };
-                tokens.remove(&id);
+                // The token lives until the reducer's ReleaseTarget: a
+                // continuous session (ADR-014) re-validates the same target
+                // for its next phrase. Every send still needs its own
+                // Prepare + commit, so keeping it cannot cause a second paste.
                 let _ = events.send(Msg::Adapter(AdapterEvent::DispatchFinished {
                     id,
                     generation,

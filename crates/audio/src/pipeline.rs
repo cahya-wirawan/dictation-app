@@ -1,11 +1,17 @@
 //! DSP worker logic: interleaved native audio → mono → 16 kHz → frames →
 //! detector → endpointer. Single-threaded and deterministic; the caller owns
 //! scheduling (drain ring, push, emit meter at ≤15 Hz).
+//!
+//! In *segmenting* mode (continuous dictation, ADR-014) a silence endpoint,
+//! the per-utterance cap or a too-short blip does not finish the pipeline:
+//! the outcome is queued as a segment (see [`Pipeline::take_segments`]) and a
+//! fresh endpointer continues with the following audio. Only the no-speech
+//! timeout or an explicit stop is terminal.
 
 use crate::FRAME_SAMPLES;
 use crate::convert::{ConvertError, dbfs, downmix_into, rms};
 use crate::detector::SpeechDetector;
-use crate::endpoint::{AlreadyFinished, EndpointConfig, Endpointer, Event, Outcome};
+use crate::endpoint::{AlreadyFinished, EndpointConfig, Endpointer, Event, FinishReason, Outcome};
 use crate::resample::{ResampleError, StreamResampler};
 
 #[derive(Debug, thiserror::Error)]
@@ -23,6 +29,9 @@ pub struct Pipeline {
     resampler: StreamResampler,
     detector: Box<dyn SpeechDetector>,
     endpointer: Endpointer,
+    cfg: EndpointConfig,
+    segmenting: bool,
+    segments: Vec<Outcome>,
     mono: Vec<f32>,
     rs_out: Vec<f32>,
     frame: Vec<f32>,
@@ -43,6 +52,9 @@ impl Pipeline {
             resampler: StreamResampler::new(native_rate)?,
             detector,
             endpointer: Endpointer::new(cfg),
+            cfg,
+            segmenting: false,
+            segments: Vec::new(),
             mono: Vec::with_capacity(8192),
             rs_out: Vec::with_capacity(4096),
             frame: Vec::with_capacity(FRAME_SAMPLES),
@@ -50,6 +62,19 @@ impl Pipeline {
             onset: false,
             outcome: None,
         })
+    }
+
+    /// Continuous dictation: keep listening after each utterance (ADR-014).
+    #[must_use]
+    pub fn segmenting(mut self) -> Self {
+        self.segmenting = true;
+        self
+    }
+
+    /// Utterances completed since the last call, oldest first. Segments are
+    /// produced only in segmenting mode and precede any terminal outcome.
+    pub fn take_segments(&mut self) -> Vec<Outcome> {
+        std::mem::take(&mut self.segments)
     }
 
     /// Normalized meter level in [0, 1] from the most recent frame (−60..0 dBFS).
@@ -105,10 +130,27 @@ impl Pipeline {
                 match self.endpointer.push(&buf, class.voiced)? {
                     Event::Continue => {}
                     Event::Onset => self.onset = true,
+                    Event::Finished(o) if self.segmenting && is_segment(&o) => {
+                        self.segments.push(o);
+                        self.endpointer = Endpointer::new(self.cfg);
+                        self.onset = false;
+                    }
                     Event::Finished(o) => return Ok(Some(o)),
                 }
             }
         }
         Ok(None)
     }
+}
+
+/// Outcomes that end one utterance but not a continuous capture.
+fn is_segment(o: &Outcome) -> bool {
+    matches!(
+        o,
+        Outcome::TooShort
+            | Outcome::Utterance {
+                reason: FinishReason::Silence | FinishReason::Cap,
+                ..
+            }
+    )
 }

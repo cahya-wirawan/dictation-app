@@ -94,6 +94,7 @@ impl CaptureAdapter for DspCapture {
         &mut self,
         id: SessionId,
         generation: Generation,
+        continuous: bool,
         events: Sender<Msg>,
     ) -> Result<(), AppError> {
         // Finished sessions have already closed their device; reap them.
@@ -104,7 +105,13 @@ impl CaptureAdapter for DspCapture {
             .map(|s| s.clone())
             .map_err(|_| AppError::NotReady)?;
         let source = (self.factory)(settings.device_id.as_deref()).map_err(capture_error)?;
+        // Utterance numbers of this capture: the actor's audio key.
+        let mut segment = 0u32;
         let sink = move |ev: DspEvent| {
+            let seg = segment;
+            if matches!(ev, DspEvent::Segment(_) | DspEvent::Finished(_)) {
+                segment += 1;
+            }
             let e = match ev {
                 DspEvent::Level(level) => AdapterEvent::CaptureLevel {
                     id,
@@ -112,26 +119,26 @@ impl CaptureAdapter for DspCapture {
                     level,
                 },
                 DspEvent::Onset => AdapterEvent::CaptureOnset { id, generation },
-                DspEvent::Finished(EpOutcome::Utterance { samples, .. }) => {
+                DspEvent::Segment(o) => {
+                    let (outcome, pcm) = split_outcome(o);
+                    AdapterEvent::CaptureSegment {
+                        id,
+                        generation,
+                        segment: seg,
+                        outcome,
+                        pcm,
+                    }
+                }
+                DspEvent::Finished(o) => {
+                    let (outcome, pcm) = split_outcome(o);
                     AdapterEvent::CaptureFinished {
                         id,
                         generation,
-                        outcome: CaptureOutcome::Speech,
-                        pcm: Some(samples),
+                        segment: seg,
+                        outcome,
+                        pcm,
                     }
                 }
-                DspEvent::Finished(EpOutcome::NoSpeech) => AdapterEvent::CaptureFinished {
-                    id,
-                    generation,
-                    outcome: CaptureOutcome::NoSpeech,
-                    pcm: None,
-                },
-                DspEvent::Finished(EpOutcome::TooShort) => AdapterEvent::CaptureFinished {
-                    id,
-                    generation,
-                    outcome: CaptureOutcome::TooShort,
-                    pcm: None,
-                },
                 DspEvent::Fault(DspFault::Capture(e)) => AdapterEvent::CaptureFailed {
                     id,
                     generation,
@@ -146,11 +153,12 @@ impl CaptureAdapter for DspCapture {
             };
             let _ = events.send(Msg::Adapter(e));
         };
-        let session = DspSession::spawn(
+        let session = DspSession::spawn_with(
             source,
             Box::new(EarshotDetector::new(self.detector)),
             settings.endpoint,
             self.poll,
+            continuous,
             sink,
         )
         .map_err(|_| AppError::AudioOverflow)?;
@@ -168,6 +176,14 @@ impl CaptureAdapter for DspCapture {
         if let Some(s) = self.sessions.get(&id) {
             s.abort();
         }
+    }
+}
+
+fn split_outcome(o: EpOutcome) -> (CaptureOutcome, Option<Vec<f32>>) {
+    match o {
+        EpOutcome::Utterance { samples, .. } => (CaptureOutcome::Speech, Some(samples)),
+        EpOutcome::NoSpeech => (CaptureOutcome::NoSpeech, None),
+        EpOutcome::TooShort => (CaptureOutcome::TooShort, None),
     }
 }
 
