@@ -6,9 +6,33 @@
 set -euo pipefail
 setup="${1:?usage: verify-windows-installer.sh <setup.exe>}"
 fail() { echo "FAIL: $*"; exit 1; }
+# Progress goes to stderr (the job log); stdout is the Markdown summary.
+log() { echo "[$(date -u +%H:%M:%S)] $*" >&2; }
+# Every phase is bounded; on a hang, show what is still running.
+bounded() {
+  local secs=$1; shift
+  local rc=0
+  timeout "$secs" "$@" || rc=$?
+  if [[ $rc -eq 124 ]]; then
+    log "TIMEOUT after ${secs}s: $*"
+    tasklist >&2 || true
+    fail "timed out: $*"
+  fi
+  return $rc
+}
 cd "$(dirname "$0")/.."
 
-"$setup" /S
+wv2=none
+for key in 'HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' \
+           'HKCU\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'; do
+  v=$(MSYS_NO_PATHCONV=1 reg query "$key" /v pv 2>/dev/null | awk '/pv/ {print $3}') || true
+  [[ -n "${v:-}" ]] && wv2="$v" && break
+done
+log "WebView2 runtime before install: $wv2"
+
+log "installing $setup (silent)"
+bounded 600 "$setup" /S
+log "installer exited"
 dir="$(cygpath -u "$LOCALAPPDATA")/Local Dictation"
 for _ in $(seq 1 60); do [[ -f "$dir/uninstall.exe" ]] && break; sleep 1; done
 [[ -d "$dir" ]] || fail "not installed under %LOCALAPPDATA%\\Local Dictation"
@@ -18,8 +42,10 @@ app=$(find "$dir" -maxdepth 1 -name '*.exe' ! -name 'dictation-worker.exe' ! -na
 [[ -n "$app" ]] || fail "main executable missing"
 [[ -f "$dir/THIRD_PARTY_NOTICES.md" ]] || fail "third-party notices missing"
 
-cargo build --release -p dictation-bench >/dev/null 2>&1
-bench_out=$(./target/release/dictation-bench corpus --worker "$(cygpath -w "$worker")" \
+log "building dictation-bench"
+bounded 1200 cargo build --release -p dictation-bench >&2
+log "transcribing through the installed worker"
+bench_out=$(bounded 600 ./target/release/dictation-bench corpus --worker "$(cygpath -w "$worker")" \
   --model .models/ggml-base.bin --sha 60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe \
   --manifest crates/bench/corpus/jfk.tsv --trials 5 --cold 3)
 echo "$bench_out" | grep -q '| jfk.wav | en |' || fail "installed worker did not transcribe: $bench_out"
@@ -27,6 +53,7 @@ echo "$bench_out" | grep -q '| jfk.wav | en |' || fail "installed worker did not
 echo "| Check | Result |"
 echo "|---|---|"
 echo "| Installer | $(basename "$setup") ($(du -h "$setup" | cut -f1)) |"
+echo "| WebView2 runtime before install | $wv2 |"
 echo "| Install scope | per-user, no elevation: $dir |"
 echo "| Installed files | $(ls "$dir" | tr '\n' ' ') |"
 echo
@@ -35,7 +62,8 @@ echo
 echo "$bench_out" | sed -n '/^| file/,/^$/p'
 echo "$bench_out" | grep -E '^cold start|^worker peak'
 
-"$dir/uninstall.exe" /S
+log "uninstalling"
+bounded 300 "$dir/uninstall.exe" /S
 for _ in $(seq 1 60); do [[ ! -f "$worker" ]] && break; sleep 1; done
 [[ ! -f "$worker" ]] || fail "uninstall left the worker behind"
 echo
