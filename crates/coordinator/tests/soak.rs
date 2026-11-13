@@ -258,8 +258,12 @@ fn soak_500_mixed_sessions() {
             .unwrap_or_else(|_| panic!("session {i} {kind:?}: no outcome"));
         let ok = match kind {
             Kind::Endpoint => o == Outcome::DraftReady(DraftReason::ReviewMode),
-            // A stop very early in the phrase may legitimately find no speech.
-            Kind::Stop => matches!(o, Outcome::DraftReady(_) | Outcome::NoSpeech),
+            // A stop very early in the phrase may legitimately find no speech,
+            // or an onset shorter than the minimum speech span (no usable text).
+            Kind::Stop => matches!(
+                o,
+                Outcome::DraftReady(_) | Outcome::NoSpeech | Outcome::NoUsableText
+            ),
             Kind::CancelListening | Kind::CancelTranscribing => o == Outcome::Canceled,
             Kind::Silence => o == Outcome::NoSpeech,
             Kind::DeviceFault => o == Outcome::Failed(AppError::MicDisconnected),
