@@ -879,7 +879,7 @@ dependencies = [
 
 [[package]]
 name = "dictation-app"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "dictation-audio",
  "dictation-coordinator",
@@ -900,7 +900,7 @@ dependencies = [
 
 [[package]]
 name = "dictation-audio"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "audioadapter-buffers",
  "cpal",
@@ -913,7 +913,7 @@ dependencies = [
 
 [[package]]
 name = "dictation-bench"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "dictation-audio",
  "dictation-domain",
@@ -926,7 +926,7 @@ dependencies = [
 
 [[package]]
 name = "dictation-coordinator"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "dictation-audio",
  "dictation-domain",
@@ -940,7 +940,7 @@ dependencies = [
 
 [[package]]
 name = "dictation-domain"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "getrandom 0.4.3",
  "serde",
@@ -950,7 +950,7 @@ dependencies = [
 
 [[package]]
 name = "dictation-models"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "serde",
  "sha2 0.11.1",
@@ -960,7 +960,7 @@ dependencies = [
 
 [[package]]
 name = "dictation-platform"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "block2",
  "libc",
@@ -4804,7 +4804,7 @@ dependencies = [
 
 [[package]]
 name = "transcription-protocol"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "dictation-domain",
  "serde",
@@ -4815,7 +4815,7 @@ dependencies = [
 
 [[package]]
 name = "transcription-worker"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "cc",
  "cmake",
