@@ -17,6 +17,10 @@ use transcription_protocol::*;
 
 const BASE_SHA256: &str = "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe";
 const T: Duration = Duration::from_secs(10);
+/// Per-job limit for real transcriptions. On the GitHub Windows runner the
+/// first job of each debug-build worker process has taken 57–72 s (later
+/// jobs ~1.3 s); see the M7 findings in docs/IMPLEMENTATION_STATUS.md.
+const JOB: Duration = Duration::from_secs(150);
 
 fn worker_exe() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_dictation-worker"))
@@ -252,22 +256,13 @@ fn jfk_fixture_transcribes_offline_on_cpu() {
     let mut c = WorkerClient::spawn(&worker_exe(), 10, T).unwrap();
     let load_ms = c.load_model(&path, &sha, Duration::from_secs(60)).unwrap();
 
-    // Generous per-job limit: on the GitHub Windows runner the first job of
-    // a debug test build has taken ~57 s (later jobs ~1.3 s); see the M6/M7
-    // findings in docs/IMPLEMENTATION_STATUS.md. Timings are still printed.
-    let job_limit = Duration::from_secs(150);
     let mut timings = Vec::new();
     let mut texts = Vec::new();
     for g in 0..3 {
         let j = job(10, g);
         let started = Instant::now();
         let r = c
-            .transcribe(
-                j,
-                Language::try_from("en".to_string()).unwrap(),
-                &pcm,
-                job_limit,
-            )
+            .transcribe(j, Language::try_from("en".to_string()).unwrap(), &pcm, JOB)
             .unwrap();
         timings.push(started.elapsed());
         assert_eq!(r.job, j);
@@ -275,7 +270,7 @@ fn jfk_fixture_transcribes_offline_on_cpu() {
         texts.push(r.text);
     }
     let auto = c
-        .transcribe(job(10, 9), Language::auto(), &pcm, job_limit)
+        .transcribe(job(10, 9), Language::auto(), &pcm, JOB)
         .unwrap();
 
     let norm = normalize(&texts[0]);
@@ -331,7 +326,7 @@ fn hard_cancel_kills_reaps_and_restarts() {
             job(21, 1),
             Language::try_from("en".to_string()).unwrap(),
             &jfk_pcm(),
-            Duration::from_secs(60),
+            JOB,
         )
         .unwrap();
     assert!(normalize(&r.text).contains("my fellow americans"));
