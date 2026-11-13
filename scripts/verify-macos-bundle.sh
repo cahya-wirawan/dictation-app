@@ -26,6 +26,16 @@ ents=$(codesign -d --entitlements - --xml "$main" 2>/dev/null || true)
 for bad in allow-jit allow-unsigned-executable-memory disable-library-validation; do
   [[ "$ents" != *"$bad"* ]] || fail "unexpected entitlement $bad"
 done
+# Expected slices: EXPECT_ARCHS (default "arm64"; universal builds pass
+# "arm64 x86_64"). App and worker must both contain every one.
+expect="${EXPECT_ARCHS:-arm64}"
+for bin in "$main" "$worker"; do
+  have=$(lipo -archs "$bin")
+  for a in $expect; do
+    [[ " $have " == *" $a "* ]] || fail "$(basename "$bin") lacks $a (has: $have)"
+  done
+done
+archs="$(lipo -archs "$main") / $(lipo -archs "$worker")"
 authority=$(codesign -dv "$main" 2>&1 | sed -n 's/^Authority=//p' | head -1)
 sig=$(codesign -dv "$main" 2>&1 | sed -n 's/^Signature=//p')
 
@@ -33,7 +43,7 @@ echo "| Check | Result |"
 echo "|---|---|"
 echo "| Version | $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist") |"
 echo "| Bundle id | $(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist") |"
-echo "| Worker | $(file -b "$worker" | cut -c1-60) |"
+echo "| Architectures (app / worker) | $archs |"
 echo "| Signature | ${authority:-${sig:-unknown}} |"
 echo "| Flags (app / worker) | $flags / $wflags |"
 echo "| Entitlements | audio-input only |"

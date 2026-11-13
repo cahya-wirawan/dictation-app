@@ -861,6 +861,16 @@ Accepted (M6). The Windows adapter (`crates/platform/src/win32.rs`) follows docs
 - **CPU baseline.** The portable build uses x86-64-v3 (AVX2, FMA, F16C, BMI2; Haswell 2013 and later), from M0 finding 7. Older CPUs are unsupported rather than silently slow (about 11× slower without AVX2). Runtime CPU dispatch (`GGML_BACKEND_DL`) remains a later option.
 - **Installer.** NSIS, per-user (`currentUser`, no admin), with an embedded WebView2 bootstrapper. Machines without WebView2 need internet once. Windows 11 and current Windows 10 builds ship WebView2.
 
+## ADR-013 — Universal macOS build (Intel Macs)
+
+Accepted. The macOS release is a universal binary: arm64 + x86_64. Apple Silicon stays the priority platform and the qualification reference (docs/07, docs/08); the Intel slice adds reach without changing behavior.
+
+- **Build.** `tauri build --target universal-apple-darwin`. The worker is built once per architecture and joined with `lipo` (`scripts/stage-worker.sh`). Each whisper.cpp build sets `CMAKE_OSX_ARCHITECTURES` explicitly to one architecture.
+- **Intel CPU baseline.** The same x86-64-v3 baseline as ADR-012 (AVX2, FMA, F16C, BMI2). Every Intel Mac that runs macOS 13 or later is a 2017 or newer model with AVX2, so this excludes no supported Mac.
+- **Inference.** CPU on both slices, as on Apple Silicon. Metal stays off (M1 finding).
+- **Evidence.** CI checks that the app and the nested worker contain both slices, and runs the x86_64 worker slice on the JFK fixture under Rosetta 2. Rosetta proves the code is correct, not how fast it is on Intel. Rosetta translates AVX2 only from macOS 15, so the check needs a macOS 15 or later host. Intel timings, and qualification on a real Intel Mac, are still open.
+- **Cost.** The DMG roughly doubles in size, because the worker and app binaries carry two slices.
+
 ## Risk register
 
 | Risk | Likelihood / impact | Mitigation and owner role |

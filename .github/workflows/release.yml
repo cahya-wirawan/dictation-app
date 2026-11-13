@@ -20,7 +20,7 @@ env:
 
 jobs:
   macos:
-    name: macOS arm64 DMG
+    name: macOS universal DMG (arm64 + x86_64)
     runs-on: macos-26
     timeout-minutes: 90
     environment: release
@@ -41,8 +41,8 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         run: test "${GITHUB_REF_NAME}" = "v$(node -p 'require("./package.json").version')"
       - run: pnpm notices:check
-      - name: Stage release worker
-        run: PROFILE=release ./scripts/stage-worker.sh
+      - name: Stage universal release worker
+        run: TARGET=universal-apple-darwin PROFILE=release ./scripts/stage-worker.sh
 
       - name: Import signing certificate
         id: cert
@@ -67,28 +67,30 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: pnpm tauri build --bundles app,dmg
+        run: pnpm tauri build --target universal-apple-darwin --bundles app,dmg
 
       - name: Build DMG (ad-hoc signed)
         if: steps.cert.outputs.signed != 'true'
         env:
           CI: "true"
-        run: pnpm tauri build --bundles app,dmg
+        run: pnpm tauri build --target universal-apple-darwin --bundles app,dmg
 
       - name: Verify signature and bundle
-        run: ./scripts/verify-macos-bundle.sh "target/release/bundle/macos/Local Dictation.app" ${{ steps.cert.outputs.signed == 'true' && '--distribution' || '' }} | tee -a "$GITHUB_STEP_SUMMARY"
+        env:
+          EXPECT_ARCHS: arm64 x86_64
+        run: ./scripts/verify-macos-bundle.sh "target/universal-apple-darwin/release/bundle/macos/Local Dictation.app" ${{ steps.cert.outputs.signed == 'true' && '--distribution' || '' }} | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: SBOM and checksums
         run: |
           mkdir -p dist-release
-          cp target/release/bundle/dmg/*.dmg dist-release/
+          cp target/universal-apple-darwin/release/bundle/dmg/*.dmg dist-release/
           node scripts/notices.mjs --check --sbom dist-release/sbom.cdx.json
           cp THIRD_PARTY_NOTICES.md dist-release/
           (cd dist-release && shasum -a 256 * > SHA256SUMS)
           cat dist-release/SHA256SUMS >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: release-macos-arm64
+          name: release-macos-universal
           path: dist-release/
           retention-days: 30
 

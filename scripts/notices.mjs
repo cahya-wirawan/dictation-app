@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Third-party notices, license policy and SBOM for what actually ships
 // (docs/10 §2): the app (src-tauri) and the worker, their *normal* Rust
-// dependencies on the three release targets, the production npm packages
+// dependencies on the release targets, the production npm packages
 // bundled into the UI, whisper.cpp/ggml (vendored C/C++) and the model weights.
 //
 //   node scripts/notices.mjs            write THIRD_PARTY_NOTICES.md
@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = join(root, "THIRD_PARTY_NOTICES.md");
-const TARGETS = ["aarch64-apple-darwin", "x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu"];
+const TARGETS = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu"];
 const SHIPPED_ROOTS = ["dictation-app", "transcription-worker"];
 // Permissive licenses acceptable in a distributed binary. Anything else
 // (GPL family, unknown, missing) fails --check and needs a human decision.

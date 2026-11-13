@@ -5,6 +5,7 @@ What each platform supports, and what that is based on. "CI evidence" means a Gi
 | Platform | Tier | Capture + transcription | Global shortcut | Automatic paste | Copy | Sleep/lock clears drafts |
 |---|---|---|---|---|---|---|
 | macOS 13+ Apple Silicon | First release (pending GUI qualification) | Yes | Yes | Yes, with Accessibility, in qualified apps | Yes | Yes (NSWorkspace) |
+| macOS 13+ Intel (universal DMG) | Same build; not yet qualified on Intel hardware (ADR-013) | Yes (CPU, x86-64-v3) | Yes | Yes, with Accessibility, in qualified apps | Yes | Yes (NSWorkspace) |
 | Windows 10/11 x64 (x86-64-v3 CPU) | Second release (pending qualification) | Yes | Yes | Yes, for same-integrity Edit/Document fields | Yes | Yes (WTS + power) |
 | Linux X11 | Experimental | Yes | Yes | **No** (draft + Copy) | Yes | Yes (logind) |
 | Linux Wayland | Manual workflow | Yes | **Unreliable**: use Start in the app window | **No** | Yes, with XWayland | Yes (logind) |

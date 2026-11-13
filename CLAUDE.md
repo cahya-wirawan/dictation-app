@@ -27,6 +27,7 @@ pnpm typecheck && pnpm lint && pnpm build # frontend (strict TS, typescript-esli
 pnpm test                                 # vitest + Testing Library (jsdom); mock ../ipc in component tests
 
 PROFILE=debug ./scripts/stage-worker.sh   # must run before building src-tauri (Tauri externalBin sidecar)
+TARGET=universal-apple-darwin PROFILE=release ./scripts/stage-worker.sh   # macOS release: arm64+x86_64 worker; then `tauri build --target universal-apple-darwin` (ADR-013)
 DICTATION_MODEL_PATH=$PWD/.models/ggml-base.bin pnpm tauri dev
 ```
 

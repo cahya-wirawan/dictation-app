@@ -17,6 +17,10 @@ All notable changes to Local Dictation are documented here. The format follows [
 
 ## [Unreleased]
 
+### Added
+
+- **Intel Macs:** the macOS DMG is now universal (Apple Silicon + Intel). On Intel it needs a CPU with AVX2, which every Mac that runs macOS 13 has. Not yet qualified on Intel hardware; see ADR-013.
+
 ## [0.8.0] - 2026-11-13
 
 ### Added (M7, Linux experiments)
