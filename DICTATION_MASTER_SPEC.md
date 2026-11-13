@@ -7,7 +7,7 @@ This single-file edition combines the complete document set. The ZIP contains th
 
 ---
 
-<!-- Source: README.md -->
+<!-- Source: docs/00_SPEC_OVERVIEW.md (the repository README until v0.9.0) -->
 
 # Local Dictation — Native Desktop Build Kit
 
