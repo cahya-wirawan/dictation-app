@@ -20,9 +20,14 @@ mod win32;
 #[cfg(windows)]
 pub use win32::*;
 
-#[cfg(not(any(target_os = "macos", windows)))]
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "linux")]
+pub use linux::*;
+
+#[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
 mod unsupported;
-#[cfg(not(any(target_os = "macos", windows)))]
+#[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
 pub use unsupported::*;
 
 #[derive(Debug, Clone, PartialEq)]

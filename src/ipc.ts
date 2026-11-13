@@ -52,6 +52,16 @@ export interface Snapshot {
   shortcuts: { toggle: string; cancel: string; error: string | null };
   micTestActive: boolean;
   lastProbe: ProbeReport | null;
+  /** Linux only: probed desktop-session capabilities. */
+  session: SessionInfo | null;
+}
+
+export interface SessionInfo {
+  kind: "x11" | "wayland" | "none";
+  desktop: string | null;
+  globalShortcutsReliable: boolean;
+  copyAvailable: boolean;
+  autoPaste: boolean;
 }
 
 export interface DraftView {

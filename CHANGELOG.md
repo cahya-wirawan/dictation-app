@@ -17,6 +17,14 @@ All notable changes to Local Dictation are documented here. The format follows [
 
 ## [Unreleased]
 
+### Added (M7, Linux experiments)
+
+- **Copy on Linux:** works on X11, and on Wayland with XWayland. The app owns the X11 clipboard selection until another app copies.
+- **Sleep, shutdown and screen lock** cancel the session and clear the draft, through systemd-logind.
+- **Session probe and UI notice:** on Linux the app states that text is never pasted automatically, that the global shortcut is unreliable on Wayland, and when Copy is unavailable.
+- **Packaging:** an experimental `.deb`. CI installs it, runs the installed worker and removes it.
+- **Docs:** a Linux support matrix in `docs/PLATFORM_SUPPORT.md`. No desktop is named as supported yet.
+
 ## [0.7.0] - 2026-11-13
 
 ### Added (M6, Windows)

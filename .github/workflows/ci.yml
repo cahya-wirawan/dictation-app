@@ -69,7 +69,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libayatana-appindicator3-dev \
-            librsvg2-dev libxdo-dev libssl-dev libasound2-dev cmake
+            librsvg2-dev libxdo-dev libssl-dev libasound2-dev cmake xvfb
 
       - name: cmake (macOS)
         if: runner.os == 'macOS'
@@ -112,6 +112,10 @@ jobs:
 
       - name: Tests (incl. real whisper.cpp inference on the JFK fixture)
         run: cargo test --workspace -- --nocapture 2>&1 | tee test-output.txt
+
+      - name: Linux X11 native tests under Xvfb (clipboard ownership, window identity)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a cargo test -p dictation-platform -- --ignored --nocapture
 
       - name: Windows native end to end (real clipboard, SendInput, UI Automation readback)
         if: runner.os == 'Windows'
@@ -161,6 +165,48 @@ jobs:
         with:
           name: LocalDictation-windows-x64-unsigned
           path: target/release/bundle/nsis/*-setup.exe
+          retention-days: 7
+
+  linux-package:
+    name: Linux .deb package (experimental)
+    needs: rust
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libayatana-appindicator3-dev \
+            librsvg2-dev libxdo-dev libssl-dev libasound2-dev cmake
+      - run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: deb
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Model cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .models/ggml-base.bin
+          key: whisper-ggml-base-60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe
+      - run: ./scripts/fetch-model.sh
+      - run: PROFILE=release ./scripts/stage-worker.sh
+      - name: Build .deb
+        run: pnpm tauri build --bundles deb
+      - name: Install, run the installed worker, remove
+        run: ./scripts/verify-linux-deb.sh target/release/bundle/deb/*.deb | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: LocalDictation-linux-x64-deb-experimental
+          path: target/release/bundle/deb/*.deb
           retention-days: 7
 
   macos-bundle:
