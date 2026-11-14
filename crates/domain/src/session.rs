@@ -623,13 +623,21 @@ impl Machine {
                 }
                 let Some(l) = self.live.as_mut() else { return };
                 if l.auto_eligible {
-                    l.text = Some(text.clone());
+                    // Continuous (ADR-014): later phrases follow the text
+                    // already pasted, so they start with a separating space.
+                    // The kept text (a possible draft) has none.
+                    let pasted = if l.continuous && l.pasted > 0 && needs_space_before(&text) {
+                        format!(" {text}")
+                    } else {
+                        text.clone()
+                    };
+                    l.text = Some(text);
                     self.phase = Delivering;
                     fx.push(Effect::PrepareDelivery {
                         id: l.id,
                         generation: l.generation,
                         mode: DeliveryMode::Automatic,
-                        text,
+                        text: pasted,
                     });
                 } else {
                     let reason = if l.closing_outcome.is_some() {
@@ -1064,4 +1072,25 @@ impl Machine {
         self.phase = Phase::DraftReady;
         fx.push(Effect::Notify(Outcome::DraftReady(reason)));
     }
+}
+
+/// Whether a continuous phrase needs a space before it when appended to the
+/// previous phrase. Not for scripts written without spaces between sentences
+/// (Chinese, Japanese, Thai, Lao, Khmer, Myanmar) or text that starts with
+/// closing punctuation.
+fn needs_space_before(text: &str) -> bool {
+    let Some(c) = text.chars().next() else {
+        return false;
+    };
+    let no_space_script = matches!(c,
+        '\u{0E00}'..='\u{0EFF}'   // Thai, Lao
+        | '\u{1000}'..='\u{109F}' // Myanmar
+        | '\u{1780}'..='\u{17FF}' // Khmer
+        | '\u{3000}'..='\u{30FF}' // CJK punctuation, Hiragana, Katakana
+        | '\u{3400}'..='\u{4DBF}' // CJK Extension A
+        | '\u{4E00}'..='\u{9FFF}' // CJK Unified Ideographs
+        | '\u{F900}'..='\u{FAFF}' // CJK Compatibility Ideographs
+        | '\u{FF00}'..='\u{FFEF}' // Half/full-width forms
+    );
+    !no_space_script && !matches!(c, ',' | '.' | ';' | ':' | '!' | '?' | ')' | ']' | '}')
 }

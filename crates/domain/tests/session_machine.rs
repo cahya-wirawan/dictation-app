@@ -1372,3 +1372,108 @@ fn continuous_needs_automatic_delivery_and_stop_is_busy_otherwise() {
     let fx = m.step(Input::Stop { id: job.session });
     assert_eq!(notified(&fx), Some(Outcome::Rejected(AppError::Busy)));
 }
+
+#[test]
+fn continuous_later_phrases_are_pasted_with_a_leading_space() {
+    let mut m = Machine::new(0);
+    let cap = start_continuous(&mut m, 1);
+    let prepared = |fx: &[Effect]| {
+        fx.iter().find_map(|e| match e {
+            Effect::PrepareDelivery { text, .. } => Some(text.clone()),
+            _ => None,
+        })
+    };
+    let (job1, _) = job_of(&segment(&mut m, cap, 0)).unwrap();
+    let fx = m.step(Input::TranscriptionDone {
+        job: job1,
+        text: " Hello there.".into(),
+    });
+    assert_eq!(
+        prepared(&fx).as_deref(),
+        Some("Hello there."),
+        "first phrase: no space"
+    );
+    m.step(Input::DeliveryPrepared {
+        id: cap.0,
+        generation: job1.generation,
+        result: Ok(()),
+    });
+    let fx = m.step(Input::DispatchFinished {
+        id: cap.0,
+        generation: job1.generation,
+        result: DispatchResult::Sent,
+    });
+    assert!(job_of(&fx).is_none());
+
+    let (job2, _) = job_of(&segment(&mut m, cap, 1)).unwrap();
+    let fx = m.step(Input::TranscriptionDone {
+        job: job2,
+        text: "How are you?".into(),
+    });
+    assert_eq!(prepared(&fx).as_deref(), Some(" How are you?"));
+    // If that phrase can't be pasted, the draft has no leading space.
+    m.step(Input::DeliveryPrepared {
+        id: cap.0,
+        generation: job2.generation,
+        result: Err(AppError::TargetChanged),
+    });
+    assert_eq!(m.draft().unwrap().text, "How are you?");
+}
+
+#[test]
+fn continuous_no_space_before_cjk_or_closing_punctuation() {
+    for (text, expected) in [
+        ("你好。", "你好。"),
+        ("こんにちは", "こんにちは"),
+        ("สวัสดี", "สวัสดี"),
+        (", and then", ", and then"),
+        ("안녕하세요", " 안녕하세요"),
+    ] {
+        let mut m = Machine::new(0);
+        let cap = start_continuous(&mut m, 1);
+        let (job1, _) = job_of(&segment(&mut m, cap, 0)).unwrap();
+        let fx = deliver(&mut m, job1);
+        assert!(job_of(&fx).is_none());
+        let (job2, _) = job_of(&segment(&mut m, cap, 1)).unwrap();
+        let fx = m.step(Input::TranscriptionDone {
+            job: job2,
+            text: text.into(),
+        });
+        assert!(
+            has(
+                &fx,
+                |e| matches!(e, Effect::PrepareDelivery { text, .. } if text == expected)
+            ),
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn single_phrase_sessions_never_get_a_leading_space() {
+    let mut m = Machine::new(0);
+    m.step(Input::Start {
+        id: sid(1),
+        now_ms: 1_000,
+        ready: Ok(()),
+        auto_delivery: true,
+        continuous: false,
+    });
+    let (id, generation) = m.live_session().unwrap();
+    m.step(Input::CaptureOpened { id, generation });
+    let fx = m.step(Input::CaptureFinished {
+        id,
+        generation,
+        segment: 0,
+        outcome: CaptureOutcome::Speech,
+    });
+    let (job, _) = job_of(&fx).unwrap();
+    let fx = m.step(Input::TranscriptionDone {
+        job,
+        text: "Hello".into(),
+    });
+    assert!(has(
+        &fx,
+        |e| matches!(e, Effect::PrepareDelivery { text, .. } if text == "Hello")
+    ));
+}

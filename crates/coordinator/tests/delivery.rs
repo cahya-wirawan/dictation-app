@@ -644,8 +644,8 @@ fn continuous_pastes_every_phrase_into_the_same_target_then_stops_on_silence() {
     r.wait_phase(Phase::Idle);
     assert_eq!(
         r.pastes(),
-        vec![(T1, Some(TEXT.into())), (T1, Some(TEXT.into()))],
-        "one paste per phrase, both into the original target"
+        vec![(T1, Some(TEXT.into())), (T1, Some(format!(" {TEXT}")))],
+        "one paste per phrase, both into the original target; later phrases start with a space"
     );
     let snap = r.h.snapshot(T).unwrap();
     assert!(
