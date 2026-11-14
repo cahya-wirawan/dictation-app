@@ -45,7 +45,9 @@ The full matrix, and what each platform's support is based on, is in [docs/PLATF
    xattr -dr com.apple.quarantine "/Applications/Local Dictation.app"
    ```
 
-Each release also includes `SHA256SUMS`, a CycloneDX SBOM and the third-party notices.
+   After an update, remove Local Dictation from System Settings → Privacy & Security → Accessibility and add it again. The old entry can look enabled but no longer applies to the new version, and text then goes to the review window instead of being pasted.
+
+Each release also includes `SHA256SUMS`, a CycloneDX SBOM and the third-party notices. To check the download, put `SHA256SUMS` next to the DMG and run `grep dmg SHA256SUMS | shasum -a 256 -c`.
 
 ### Windows and Linux
 

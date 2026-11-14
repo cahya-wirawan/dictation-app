@@ -44,6 +44,7 @@ Use **Test microphone** to see the input level. The test turns the microphone of
 - Without Accessibility, the app still works in **copy-only** mode: text appears in the review window, and you copy it yourself.
 - After changing a permission in System Settings, come back to the app and press **Check again**.
 - If you deny a permission and later want it back, enable it in System Settings. macOS does not show the prompt twice.
+- **After updating the app, grant Accessibility again.** Releases are not notarized yet, so macOS treats each new version as a different app. The old entry can still look switched on but no longer applies, and dictation falls back to copy-only. In System Settings → Privacy & Security → Accessibility, select Local Dictation, remove it with **−**, then add it again with **+** (or run `tccutil reset Accessibility app.localdictation.m0` and grant it when asked).
 - Local Dictation never asks for Screen Recording, Input Monitoring or Automation.
 
 ## Shortcut conflicts

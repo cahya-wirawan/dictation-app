@@ -17,6 +17,12 @@ All notable changes to Local Dictation are documented here. The format follows [
 
 ## [Unreleased]
 
+### Fixed
+
+- **macOS: the app could freeze after a dictation**, most visibly when the result became a draft while the Settings window was open; the next shortcut press then left it unresponsive. The tray status update waited for the main thread while the main thread waited for the dictation coordinator. Tray updates no longer wait, and shortcut handling and the commands that query the coordinator no longer run on the main thread.
+- **Docs: grant Accessibility again after updating on macOS.** Releases are not notarized, so macOS treats each version as a new app. The old Accessibility entry stops applying and dictation silently falls back to the review window. README and SUPPORT now explain how to re-grant it.
+- **`SHA256SUMS` now names the DMG the way GitHub serves it** (`Local.Dictation_…`, not `Local Dictation_…`), so `shasum -a 256 -c SHA256SUMS` verifies the downloaded file without renaming it.
+
 ## [0.10.0] - 2026-11-13
 
 ### Added
