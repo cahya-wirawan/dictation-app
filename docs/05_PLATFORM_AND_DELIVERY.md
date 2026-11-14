@@ -64,7 +64,7 @@ Algorithm:
 8. Always release only synthetic keys issued by this transaction, including on API error. Record sent/uncertain based on actual API return. Never infer document acceptance from SendInput success.
 9. Clear active audio/text from app memory after a sent outcome; show “Paste sent.” On blocked/uncertain result retain a draft with outcome metadata and require explicit action for resend.
 
-No automatic Enter. Multiline paste can still have application-specific effects, especially in terminals; terminal targets are excluded from automatic delivery by default. User may enable a named, tested terminal profile after a separate confirmation about pasted commands/newlines. Exclusions are evaluated by native app identity, not a window title alone.
+No automatic Enter. Multiline paste can still have application-specific effects, especially in terminals; terminal targets are excluded from automatic delivery by default. User may enable a named, tested terminal profile after a separate confirmation about pasted commands/newlines (implemented as `delivery.trusted_terminals`, ADR-016). Exclusions are evaluated by native app identity, not a window title alone.
 
 ## 6. Optional clipboard preservation
 

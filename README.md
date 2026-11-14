@@ -9,7 +9,7 @@ Local Dictation is a small desktop dictation app that runs entirely on your comp
 - **Global shortcut dictation.** Toggle to start, then stop by pausing (1 s of silence by default) or by pressing the shortcut again. A separate shortcut cancels.
 - **Optional continuous dictation.** Keep listening after each phrase and paste every phrase as you pause, until you press the shortcut again or stop talking.
 - **Pastes into the original field, exactly once.** The app records which app, window and text field were focused when you started. It pastes only if that same field is still focused when the text is ready. Otherwise it keeps a **draft** you can review, edit and copy.
-- **Safe by default.** Never pastes into password fields, terminals or apps you exclude. Never presses Enter, never steals focus, never retries a paste.
+- **Safe by default.** Never pastes into password fields, terminals (unless you allow one; line breaks are then removed) or apps you exclude. Never presses Enter, never steals focus, never retries a paste.
 - **Fully local.** Audio stays in memory and is never written to disk. Transcription runs on the CPU in a separate worker process. The only network access is a model download you start yourself.
 - **Multilingual.** Whisper Base (148 MB, default) or Small (488 MB). Language detection is automatic, or you can fix English, German or Indonesian.
 - **Lightweight.** A tray/menu-bar app with a small status HUD. The microphone is open only while you dictate.

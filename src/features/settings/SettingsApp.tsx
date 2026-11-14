@@ -176,7 +176,7 @@ export function SettingsApp() {
               )}
             </div>
           )}
-          {page === "delivery" && <Delivery cfg={cfg} patch={patch} onError={reportError} />}
+          {page === "delivery" && <Delivery cfg={cfg} patch={patch} onError={reportError} platform={snapshot.platform} />}
           {page === "privacy" && <Privacy />}
           {page === "about" && <About snapshot={snapshot} />}
         </div>
@@ -296,9 +296,37 @@ function Recording({ cfg, patch, onError }: PageProps) {
   );
 }
 
-function Delivery({ cfg, patch, onError }: PageProps) {
+/** Display names for the terminal list in Rust (`TERMINAL_APPS`, ADR-016). */
+const TERMINALS: Record<string, readonly (readonly [string, string])[]> = {
+  macos: [
+    ["com.apple.Terminal", "Terminal"],
+    ["com.googlecode.iterm2", "iTerm2"],
+    ["dev.warp.Warp-Stable", "Warp"],
+    ["io.alacritty", "Alacritty"],
+    ["net.kovidgoyal.kitty", "kitty"],
+    ["com.mitchellh.ghostty", "Ghostty"],
+    ["co.zeit.hyper", "Hyper"],
+    ["com.github.wez.wezterm", "WezTerm"],
+    ["org.tabby", "Tabby"],
+  ],
+  windows: [
+    ["windowsterminal.exe", "Windows Terminal"],
+    ["powershell.exe", "Windows PowerShell"],
+    ["pwsh.exe", "PowerShell 7"],
+    ["cmd.exe", "Command Prompt"],
+    ["wezterm-gui.exe", "WezTerm"],
+    ["alacritty.exe", "Alacritty"],
+    ["mintty.exe", "mintty (Git Bash)"],
+    ["kitty.exe", "kitty"],
+    ["tabby.exe", "Tabby"],
+    ["hyper.exe", "Hyper"],
+  ],
+};
+
+function Delivery({ cfg, patch, onError, platform }: PageProps & { platform: string }) {
   const [perm, setPerm] = useState<Permissions | null>(null);
   const [newApp, setNewApp] = useState("");
+  const [confirmTerminal, setConfirmTerminal] = useState<string | null>(null);
   const recheck = useCallback(() => { checkPermissions().then(setPerm).catch((e: unknown) => { onError(errorText(e)); }); }, [onError]);
   useEffect(recheck, [recheck]);
   const ax = perm?.accessibility;
@@ -312,6 +340,9 @@ function Delivery({ cfg, patch, onError }: PageProps) {
       {ax && ax !== "notApplicable" && (
         <p role="status" className={ax === "granted" ? "hint" : "error"}>
           Accessibility: {ax === "granted" ? "enabled" : "not enabled — automatic paste falls back to copy"}.
+          {ax !== "granted" && platform === "macos" && (
+            <> If System Settings already shows Local Dictation as enabled, that entry belongs to an earlier version: select it, remove it with −, then click the button below again.</>
+          )}
           {ax !== "granted" && (
             <>
               {" "}
@@ -345,8 +376,43 @@ function Delivery({ cfg, patch, onError }: PageProps) {
         <button type="button" disabled={!newApp} onClick={() => { patch({ delivery: { excluded_apps: [...cfg.delivery.excluded_apps, newApp] } }); setNewApp(""); }}>
           Add exclusion
         </button>
-        <p className="hint">Terminal apps are always excluded.</p>
+        <p className="hint">Terminal apps are excluded unless you allow them below.</p>
       </fieldset>
+      {(TERMINALS[platform] ?? []).length > 0 && (
+        <fieldset>
+          <legend>Allow automatic paste into these terminals</legend>
+          <p className="hint">
+            A terminal pastes into whatever has its focus: an editor such as vim, but also a command prompt. To keep a paste
+            from running a command, line breaks, tabs and other control characters are replaced with spaces, so a paste
+            never presses Enter. Check what is focused in the terminal before you dictate.
+          </p>
+          {(TERMINALS[platform] ?? []).map(([id, name]) => {
+            const trusted = cfg.delivery.trusted_terminals.some((t) => t.toLowerCase() === id.toLowerCase());
+            const rest = cfg.delivery.trusted_terminals.filter((t) => t.toLowerCase() !== id.toLowerCase());
+            return (
+              <div key={id}>
+                <label className="check">
+                  <input type="checkbox" checked={trusted || confirmTerminal === id} onChange={(e) => {
+                    if (e.target.checked) { setConfirmTerminal(id); return; }
+                    setConfirmTerminal(null);
+                    patch({ delivery: { trusted_terminals: rest } });
+                  }} />
+                  {name}
+                </label>
+                {confirmTerminal === id && !trusted && (
+                  <p role="alert" className="error">
+                    Dictated text will be pasted into {name} wherever its focus is, including a command prompt. Allow?{" "}
+                    <button type="button" onClick={() => { setConfirmTerminal(null); patch({ delivery: { trusted_terminals: [...rest, id] } }); }}>
+                      Allow
+                    </button>{" "}
+                    <button type="button" onClick={() => { setConfirmTerminal(null); }}>Cancel</button>
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </fieldset>
+      )}
     </div>
   );
 }

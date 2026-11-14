@@ -54,6 +54,13 @@ The Tauri crate compiles and links on macOS, and the bundle layout is correct.
 
 Lockfiles: `Cargo.lock`, `pnpm-lock.yaml`.
 
+## Trusted terminals (after v0.11.0, ADR-016)
+
+- **Setting:** `delivery.trusted_terminals` (schema v5, `v4_to_v5`). Validation accepts only `TERMINAL_APPS`, which moved from the coordinator to `crates/domain/src/config.rs`; `delivery::DEFAULT_EXCLUDED_APPS` re-exports it.
+- **Delivery:** `SharedExclusions` is now `Arc<Mutex<DeliveryLists>>` (exclusions and trusted terminals). `excluded_app` lets a trusted terminal through unless the user excluded it. `prepare` passes text for any terminal through `terminal_safe`, which turns control characters and U+2028/U+2029 into spaces.
+- **UI:** Settings → Delivery lists the terminals for the platform; enabling one needs an inline **Allow**.
+- **Tests:** config migration and validation, 2 scripted-platform tests. Not yet verified on a real desktop.
+
 ## HUD Cancel button and position (after v0.10.2, ADR-015)
 
 - **Cancel:** the HUD shows a × button while starting, listening, finalizing, transcribing or delivering. It calls `cancel_dictation`, the HUD's only granted command (`capabilities/hud.json`). `acceptFirstMouse` is on so the first click on the inactive HUD registers.

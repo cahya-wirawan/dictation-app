@@ -100,10 +100,10 @@ fn oversized_file_is_treated_as_corrupt() {
 fn future_schema_is_never_overwritten_until_reset() {
     let dir = tmpdir("future");
     std::fs::create_dir_all(&dir).unwrap();
-    let future = r#"{"schema_version": 5, "new_feature": true}"#;
+    let future = r#"{"schema_version": 6, "new_feature": true}"#;
     std::fs::write(dir.join("settings.json"), future).unwrap();
     let (mut s, o) = ConfigStore::open(&dir).unwrap();
-    assert_eq!(o, LoadOutcome::FutureSchema { version: 5 });
+    assert_eq!(o, LoadOutcome::FutureSchema { version: 6 });
     assert!(s.is_read_only());
     assert!(matches!(
         s.update(1, &json!({"ui": {"show_hud": false}})),

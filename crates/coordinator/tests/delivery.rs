@@ -235,7 +235,7 @@ impl Rig {
         let data = Arc::new(audio);
         let (otx, outcomes) = mpsc::channel();
         let (ptx, phases) = mpsc::channel();
-        let excluded: SharedExclusions = Arc::new(Mutex::new(vec![]));
+        let excluded: SharedExclusions = Arc::default();
         let w2 = Arc::clone(&world);
         let coord = Coordinator::spawn(
             Adapters {
@@ -411,10 +411,81 @@ fn terminals_and_user_exclusions_are_copy_only() {
         },
         Duration::from_millis(5),
     );
-    r.excluded.lock().unwrap().push("com.example.secret".into());
+    r.excluded
+        .lock()
+        .unwrap()
+        .excluded
+        .push("com.example.secret".into());
     r.h.send(Command::Toggle);
     assert_eq!(r.outcome(), Outcome::DraftReady(DraftReason::ReviewMode));
     assert!(r.pastes().is_empty());
+}
+
+#[test]
+fn a_trusted_terminal_gets_automatic_paste_unless_the_user_excluded_it() {
+    let r = Rig::new(
+        World {
+            app_id: Some("com.apple.Terminal".into()),
+            ..World::default()
+        },
+        Duration::from_millis(5),
+    );
+    r.excluded
+        .lock()
+        .unwrap()
+        .trusted_terminals
+        .push("com.apple.terminal".into());
+    r.h.send(Command::Toggle);
+    assert_eq!(r.outcome(), Outcome::PasteSent);
+    assert_eq!(r.pastes(), vec![(T1, Some(TEXT.into()))]);
+
+    // Another terminal is still excluded: trust is per app.
+    let r = Rig::new(
+        World {
+            app_id: Some("com.googlecode.iterm2".into()),
+            ..World::default()
+        },
+        Duration::from_millis(5),
+    );
+    r.excluded
+        .lock()
+        .unwrap()
+        .trusted_terminals
+        .push("com.apple.Terminal".into());
+    r.h.send(Command::Toggle);
+    assert_eq!(r.outcome(), Outcome::DraftReady(DraftReason::ReviewMode));
+    assert!(r.pastes().is_empty());
+
+    // A user exclusion wins over trust.
+    let r = Rig::new(
+        World {
+            app_id: Some("com.apple.Terminal".into()),
+            ..World::default()
+        },
+        Duration::from_millis(5),
+    );
+    {
+        let mut l = r.excluded.lock().unwrap();
+        l.trusted_terminals.push("com.apple.Terminal".into());
+        l.excluded.push("com.apple.Terminal".into());
+    }
+    r.h.send(Command::Toggle);
+    assert_eq!(r.outcome(), Outcome::DraftReady(DraftReason::ReviewMode));
+    assert!(r.pastes().is_empty());
+}
+
+#[test]
+fn terminal_text_never_contains_a_line_break_or_control_character() {
+    use dictation_coordinator::delivery::terminal_safe;
+    assert_eq!(
+        terminal_safe("rm -rf build\nls\r\n\tcd\u{1b}[200~x\u{2028}y\u{85}z"),
+        "rm -rf build ls   cd [200~x y z"
+    );
+    assert_eq!(
+        terminal_safe(" Grüß Gott 👋"),
+        " Grüß Gott 👋",
+        "printable text unchanged"
+    );
 }
 
 #[test]

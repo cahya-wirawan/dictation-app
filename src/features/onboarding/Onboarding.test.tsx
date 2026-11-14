@@ -47,10 +47,10 @@ const snapshot = (over: Partial<Snapshot> = {}): Snapshot => ({
 });
 
 const config = {
-  schema_version: 4, revision: 1,
+  schema_version: 5, revision: 1,
   audio: { device_id: null, silence_ms: 1000, no_speech_timeout_ms: 8000, max_capture_ms: 120000, continuous: false },
   transcription: { model_id: "whisper-base-multilingual", language: "auto", backend: "auto" },
-  delivery: { mode: "auto_paste", clipboard_policy: "leave_text", excluded_apps: [] },
+  delivery: { mode: "auto_paste", clipboard_policy: "leave_text", excluded_apps: [], trusted_terminals: [] },
   shortcuts: { toggle: "Ctrl+Alt+Space", cancel: "Ctrl+Alt+Escape", paste_draft: null },
   ui: { show_hud: true, launch_at_login: false, locale: "en", onboarding_complete: false, reduced_motion: false, hud_position: "bottom_center" },
 } satisfies Config;

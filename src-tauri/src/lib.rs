@@ -28,7 +28,9 @@ use dictation_coordinator::adapters::{
     live_source,
 };
 use dictation_coordinator::config_store::{ConfigStore, LoadOutcome};
-use dictation_coordinator::delivery::{NativePlatform, PlatformDelivery, SharedExclusions};
+use dictation_coordinator::delivery::{
+    DeliveryLists, NativePlatform, PlatformDelivery, SharedExclusions,
+};
 use dictation_coordinator::diagnostics::{Diagnostics, RecordingNotifier};
 use dictation_domain::chord::ChordFilter;
 use dictation_domain::config::Config;
@@ -702,7 +704,9 @@ fn apply_delivery_settings(state: &AppState, cfg: &Config) {
         .handle
         .send(Command::SetContinuous(cfg.audio.continuous));
     if let Ok(mut e) = state.excluded.lock() {
-        e.clone_from(&cfg.delivery.excluded_apps);
+        e.excluded.clone_from(&cfg.delivery.excluded_apps);
+        e.trusted_terminals
+            .clone_from(&cfg.delivery.trusted_terminals);
     }
 }
 
@@ -890,7 +894,10 @@ pub fn run() {
                 endpoint: endpoint_from(&cfg),
             }));
             let language = Arc::new(Mutex::new(language_from(&cfg)));
-            let excluded: SharedExclusions = Arc::new(Mutex::new(cfg.delivery.excluded_apps.clone()));
+            let excluded: SharedExclusions = Arc::new(Mutex::new(DeliveryLists {
+                excluded: cfg.delivery.excluded_apps.clone(),
+                trusted_terminals: cfg.delivery.trusted_terminals.clone(),
+            }));
             let diagnostics = Diagnostics::new();
             let transcriber = WorkerTranscriber::new(
                 WorkerConfig {
