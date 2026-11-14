@@ -22,6 +22,10 @@ All notable changes to Local Dictation are documented here. The format follows [
 - **Cancel button on the status HUD.** Click × while listening or transcribing to cancel, the same as the cancel shortcut. Nothing is pasted. ADR-015.
 - **Status HUD position.** Settings → General → *Status indicator position*: bottom center (default), top center, or a corner. The HUD appears on the display under the pointer. Settings schema v4; older settings files are migrated automatically.
 
+### Fixed
+
+- **Continuous dictation ran phrases together** ("Hello there.How are you?"). Every phrase after the first now starts with a space. Not for Chinese, Japanese, Thai, Lao, Khmer or Myanmar text, which has no spaces between sentences, nor before text that starts with a comma or closing punctuation. A phrase kept as a draft has no leading space.
+
 ## [0.10.2] - 2026-11-14
 
 ### Added
