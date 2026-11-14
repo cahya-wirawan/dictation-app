@@ -64,6 +64,8 @@ pub(crate) struct AppState {
     toggle_filter: Mutex<ChordFilter>,
     cancel_filter: Mutex<ChordFilter>,
     paste_filter: Mutex<ChordFilter>,
+    /// Filtered shortcut presses for the `shortcuts` thread.
+    shortcut_tx: Mutex<std::sync::mpsc::Sender<ShortcutAction>>,
     excluded: SharedExclusions,
     shortcut_error: Mutex<Option<String>>,
     mic_test: Mutex<Option<MicTest>>,
@@ -316,10 +318,11 @@ pub(crate) fn refresh_readiness(state: &AppState) {
 
 /// Tray tooltip mirrors the coordinator phase and readiness, so the state is
 /// visible without opening a window (docs/02 §1). Never contains text.
+///
+/// Called from the coordinator thread. Tauri's tray setters wait for the main
+/// thread to run them, and sync commands make the main thread wait for the
+/// coordinator, so the update is queued to the main thread, never awaited.
 pub(crate) fn update_tray_status(app: &AppHandle, phase: Option<Phase>) {
-    let Some(tray) = app.tray_by_id("main-tray") else {
-        return;
-    };
     let ready = app.try_state::<AppState>().map(|s| readiness(&s));
     let status = match phase {
         Some(Phase::Starting | Phase::Listening) => "Listening…",
@@ -334,7 +337,13 @@ pub(crate) fn update_tray_status(app: &AppHandle, phase: Option<Phase>) {
             _ => "Not ready",
         },
     };
-    let _ = tray.set_tooltip(Some(format!("Local Dictation — {status}")));
+    let tooltip = format!("Local Dictation — {status}");
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(tray) = handle.tray_by_id("main-tray") {
+            let _ = tray.set_tooltip(Some(tooltip));
+        }
+    });
 }
 
 fn endpoint_from(cfg: &Config) -> EndpointConfig {
@@ -354,8 +363,11 @@ fn parse_id(s: &str) -> Result<SessionId, String> {
     s.parse().map_err(|_| "STALE_REQUEST".to_string())
 }
 
+// Commands that wait for a coordinator reply are `async` so they run on the
+// async runtime: a sync command runs on the main thread and would freeze the
+// whole app (windows, tray, AX replies) while it waits.
 #[tauri::command]
-fn get_snapshot(app: AppHandle, state: State<'_, AppState>) -> Snapshot {
+async fn get_snapshot(app: AppHandle, state: State<'_, AppState>) -> Result<Snapshot, String> {
     let ready = readiness(&state);
     state.handle.send(Command::SetReady(ready));
     let core = state.handle.snapshot(IPC_TIMEOUT);
@@ -376,7 +388,7 @@ fn get_snapshot(app: AppHandle, state: State<'_, AppState>) -> Snapshot {
             .and_then(|s| s.map(|s| s.to_string()))
             .unwrap_or_default()
     };
-    Snapshot {
+    Ok(Snapshot {
         schema_version: 1,
         app_version: app.package_info().version.to_string(),
         platform: std::env::consts::OS,
@@ -410,11 +422,11 @@ fn get_snapshot(app: AppHandle, state: State<'_, AppState>) -> Snapshot {
         mic_test_active,
         last_probe: state.last_probe.lock().ok().and_then(|p| p.clone()),
         session: state.session.clone(),
-    }
+    })
 }
 
 #[tauri::command]
-fn start_dictation(state: State<'_, AppState>) -> Result<(), String> {
+async fn start_dictation(state: State<'_, AppState>) -> Result<(), String> {
     let busy_test = state
         .mic_test
         .lock()
@@ -445,7 +457,7 @@ fn cancel_dictation(state: State<'_, AppState>) {
 /// Settings/review window only (capability-scoped). Opening review revokes
 /// automatic delivery for an in-flight session (docs/04 invariant 9).
 #[tauri::command]
-fn get_draft(
+async fn get_draft(
     window: tauri::WebviewWindow,
     state: State<'_, AppState>,
 ) -> Result<Option<DraftView>, String> {
@@ -579,7 +591,7 @@ fn list_input_devices() -> Result<Vec<DeviceView>, String> {
 }
 
 #[tauri::command]
-fn start_mic_test(
+async fn start_mic_test(
     app: AppHandle,
     state: State<'_, AppState>,
     device_id: Option<String>,
@@ -662,6 +674,17 @@ fn apply_delivery_settings(state: &AppState, cfg: &Config) {
     }
 }
 
+/// A filtered shortcut press, handled on the `shortcuts` thread.
+#[derive(Clone, Copy)]
+enum ShortcutAction {
+    Toggle,
+    Cancel,
+    PasteDraft,
+}
+
+/// Runs on the main thread (global-shortcut callback), so it only filters the
+/// press and queues it. Anything that waits for the coordinator happens on
+/// the `shortcuts` thread, which keeps presses in order.
 fn on_shortcut(app: &AppHandle, shortcut: &Shortcut, pressed: bool) {
     let Some(state) = app.try_state::<AppState>() else {
         return;
@@ -672,39 +695,49 @@ fn on_shortcut(app: &AppHandle, shortcut: &Shortcut, pressed: bool) {
             .and_then(|s| *s)
             .is_some_and(|s| &s == shortcut)
     };
-    if is(&state.toggle)
-        && state
-            .toggle_filter
-            .lock()
-            .is_ok_and(|mut f| f.on_event(pressed))
+    let hit = |filter: &Mutex<ChordFilter>| filter.lock().is_ok_and(|mut f| f.on_event(pressed));
+    let action = if is(&state.toggle) {
+        hit(&state.toggle_filter).then_some(ShortcutAction::Toggle)
+    } else if is(&state.cancel) {
+        hit(&state.cancel_filter).then_some(ShortcutAction::Cancel)
+    } else if is(&state.paste_draft) {
+        hit(&state.paste_filter).then_some(ShortcutAction::PasteDraft)
+    } else {
+        None
+    };
+    if let Some(a) = action
+        && let Ok(tx) = state.shortcut_tx.lock()
     {
-        let idle = matches!(
-            state.handle.snapshot(IPC_TIMEOUT).map(|s| s.phase),
-            Some(Phase::Idle)
-        );
-        if idle {
-            run_hud_probe(app.clone());
+        let _ = tx.send(a);
+    }
+}
+
+fn run_shortcut(app: &AppHandle, action: ShortcutAction) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    match action {
+        ShortcutAction::Toggle => {
+            let idle = matches!(
+                state.handle.snapshot(IPC_TIMEOUT).map(|s| s.phase),
+                Some(Phase::Idle)
+            );
+            if idle {
+                run_hud_probe(app.clone());
+            }
+            state.handle.send(Command::Toggle);
         }
-        state.handle.send(Command::Toggle);
-    } else if is(&state.cancel)
-        && state
-            .cancel_filter
-            .lock()
-            .is_ok_and(|mut f| f.on_event(pressed))
-    {
-        state.handle.send(Command::Cancel);
-    } else if is(&state.paste_draft)
-        && state
-            .paste_filter
-            .lock()
-            .is_ok_and(|mut f| f.on_event(pressed))
-    {
-        // Explicit delivery: the target is the field focused at this press.
-        if let Some(d) = state.handle.snapshot(IPC_TIMEOUT).and_then(|s| s.draft) {
-            state.handle.send(Command::DraftPaste {
-                id: d.id,
-                revision: d.revision,
-            });
+        ShortcutAction::Cancel => {
+            state.handle.send(Command::Cancel);
+        }
+        ShortcutAction::PasteDraft => {
+            // Explicit delivery: the target is the field focused at this press.
+            if let Some(d) = state.handle.snapshot(IPC_TIMEOUT).and_then(|s| s.draft) {
+                state.handle.send(Command::DraftPaste {
+                    id: d.id,
+                    revision: d.revision,
+                });
+            }
         }
     }
 }
@@ -875,6 +908,16 @@ pub fn run() {
             // Observers live for the whole process (main-thread objects).
             let _watch: &'static mut _ = Box::leak(Box::new(watch));
 
+            let (shortcut_tx, shortcut_rx) = std::sync::mpsc::channel();
+            let shortcut_app = app.handle().clone();
+            std::thread::Builder::new()
+                .name("shortcuts".into())
+                .spawn(move || {
+                    while let Ok(a) = shortcut_rx.recv() {
+                        run_shortcut(&shortcut_app, a);
+                    }
+                })?;
+
             app.manage(AppState {
                 coordinator: Mutex::new(Some(coordinator)),
                 handle,
@@ -891,6 +934,7 @@ pub fn run() {
                 toggle_filter: Mutex::new(ChordFilter::default()),
                 cancel_filter: Mutex::new(ChordFilter::default()),
                 paste_filter: Mutex::new(ChordFilter::default()),
+                shortcut_tx: Mutex::new(shortcut_tx),
                 excluded,
                 shortcut_error: Mutex::new(None),
                 mic_test: Mutex::new(None),

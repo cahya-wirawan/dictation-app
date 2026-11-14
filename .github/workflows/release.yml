@@ -83,7 +83,11 @@ jobs:
       - name: SBOM and checksums
         run: |
           mkdir -p dist-release
-          cp target/universal-apple-darwin/release/bundle/dmg/*.dmg dist-release/
+          # GitHub turns spaces in asset names into dots. Name the files that
+          # way here so SHA256SUMS matches what users download.
+          for f in target/universal-apple-darwin/release/bundle/dmg/*.dmg; do
+            b=$(basename "$f"); cp "$f" "dist-release/${b// /.}"
+          done
           node scripts/notices.mjs --check --sbom dist-release/sbom.cdx.json
           cp THIRD_PARTY_NOTICES.md dist-release/
           (cd dist-release && shasum -a 256 * > SHA256SUMS)
