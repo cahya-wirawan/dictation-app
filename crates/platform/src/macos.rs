@@ -243,13 +243,24 @@ pub fn check_target(start: &TargetSnapshot) -> TargetCheck {
     }
 }
 
+/// Virtual key codes of the left and right Command, Shift, Option and Control
+/// keys (HIToolbox `kVK_*`).
+const MODIFIER_KEYS: [u16; 8] = [0x37, 0x36, 0x38, 0x3C, 0x3A, 0x3D, 0x3B, 0x3E];
+
+/// Whether the user physically holds Command, Shift, Option or Control.
+///
+/// Reads each modifier key's up/down state rather than the HID system flags:
+/// our own Cmd+V carries the Command *flag* on the V events, and macOS keeps
+/// that flag in the HID system flags state after the chord, so a flags check
+/// reported Command as held for every phrase after the first paste of a
+/// continuous session. We never post a modifier key event, so the per-key
+/// state reflects only real keys.
 pub fn physical_modifiers_down() -> Option<bool> {
-    let flags = CGEventSource::flags_state(CGEventSourceStateID::HIDSystemState);
-    let mask = CGEventFlags::MaskCommand
-        | CGEventFlags::MaskControl
-        | CGEventFlags::MaskAlternate
-        | CGEventFlags::MaskShift;
-    Some(flags.intersects(mask))
+    Some(
+        MODIFIER_KEYS
+            .iter()
+            .any(|&k| CGEventSource::key_state(CGEventSourceStateID::HIDSystemState, k)),
+    )
 }
 
 /// Writes plain Unicode text only. Returns the new change count, which acts as

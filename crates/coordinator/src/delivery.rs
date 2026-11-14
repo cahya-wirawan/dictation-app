@@ -360,12 +360,15 @@ fn run<P: TargetPlatform>(
                         return Err(check_error(c));
                     }
                     if !p.modifiers_released(MODIFIER_TIMEOUT) {
+                        trace(id, "prepare: modifiers", &"still held");
                         return Err(AppError::ModifiersHeld);
                     }
                     if is_canceled(id) {
+                        trace(id, "prepare", &"canceled");
                         return Err(AppError::StaleRequest); // reducer already moved on
                     }
-                    p.write_clipboard(&text)?;
+                    p.write_clipboard(&text)
+                        .inspect_err(|e| trace(id, "prepare: clipboard", e))?;
                     // Clipboard mutation cannot be atomic with focus: recheck.
                     let c = p.check(t);
                     trace(id, "prepare: after clipboard", &c);

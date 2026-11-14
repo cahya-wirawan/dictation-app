@@ -69,6 +69,7 @@ Field reports on an Intel Mac (14 November 2026) found two bugs that the headles
 
 1. **v0.10.0/v0.10.1: the session ended after the first phrase.** The hidden `review` webview refreshes on every outcome, and `get_draft` sent `ReviewOpened` for it. Fixed: only a visible window sends it (#27).
 2. **v0.10.1 with fix 1: every phrase after the first became a `TargetChanged` draft.** The editor's focused field had a new AX identity after the paste. Fixed by the post-paste token refresh (ADR-014 amendment, `delivery::refresh_token`), with 2 scripted-platform tests.
+3. **The refresh did not fix it in TextEdit.** A delivery trace (`DICTATION_TRACE_DELIVERY=1`, new) showed that phrase 2 passed the target check, the token refresh succeeded, and `prepare` then stopped in the modifier wait. The cause: `physical_modifiers_down` read `CGEventSourceFlagsState(HIDSystemState)`, and the Command flag our own Cmd+V carries stays set in that state after the chord. Fixed: it now reads `CGEventSourceKeyState` for the eight modifier key codes. We never post a modifier key event, so that state reflects only real keys. The identity-change explanation in fix 2 is unconfirmed; the refresh is kept as a guard for editors that do recreate their field.
 
 Continuous dictation is still unverified after these fixes.
 
