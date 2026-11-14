@@ -17,6 +17,8 @@ All notable changes to Local Dictation are documented here. The format follows [
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-11-14
+
 ### Fixed
 
 - **macOS: the app could freeze after a dictation**, most visibly when the result became a draft while the Settings window was open; the next shortcut press then left it unresponsive. The tray status update waited for the main thread while the main thread waited for the dictation coordinator. Tray updates no longer wait, and shortcut handling and the commands that query the coordinator no longer run on the main thread.
@@ -217,7 +219,8 @@ Milestone M0 feasibility spike, partially complete. See `docs/IMPLEMENTATION_STA
 - No dictation session flow yet: there is no coordinator, config persistence, model manager or onboarding (milestone M1 and later).
 - Performance numbers so far come from a Linux x86_64 development host, not the reference hardware.
 
-[Unreleased]: https://github.com/cahya-wirawan/dictation-app/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/cahya-wirawan/dictation-app/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/cahya-wirawan/dictation-app/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/cahya-wirawan/dictation-app/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/cahya-wirawan/dictation-app/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/cahya-wirawan/dictation-app/compare/v0.7.0...v0.8.0
