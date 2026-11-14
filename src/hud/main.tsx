@@ -1,11 +1,15 @@
 import { StrictMode, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { onHudBanner, onLevel, onPhase, type Outcome, type Phase } from "../ipc";
+import { cancelDictation, onHudBanner, onLevel, onPhase, type Outcome, type Phase } from "../ipc";
 import { outcomeText, phaseLabel } from "../messages";
 import { useEvent } from "../useEvent";
 import "../styles.css";
 
-/** HUD: phase, level, elapsed time and short banners. No commands, no text. */
+/**
+ * HUD: phase, level, elapsed time and short banners, never text. Its one
+ * command is Cancel (ADR-015): it discards the session, so a click can never
+ * misdirect a paste.
+ */
 function Hud() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [since, setSince] = useState(() => Date.now());
@@ -22,6 +26,7 @@ function Hud() {
   const secs = Math.max(0, Math.floor((now - since) / 1000));
   const listening = phase === "listening";
   const working = phase === "transcribing" || phase === "delivering" || phase === "finalizing";
+  const cancelable = listening || working || phase === "starting";
   if (banner) {
     return <div className="hud-pill banner">{outcomeText(banner)}</div>;
   }
@@ -31,6 +36,10 @@ function Hud() {
       {(listening || working) && <span className="hud-time">{secs}s</span>}
       {listening && (
         <span className="hud-meter" aria-hidden="true"><span style={{ width: `${String(Math.round(level * 100))}%` }} /></span>
+      )}
+      {cancelable && (
+        <button type="button" className="hud-close" tabIndex={-1} aria-label="Cancel dictation" title="Cancel dictation"
+          onClick={() => { void cancelDictation().catch(() => undefined); }}>×</button>
       )}
     </div>
   );

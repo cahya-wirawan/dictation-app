@@ -32,7 +32,7 @@ use dictation_coordinator::delivery::{NativePlatform, PlatformDelivery, SharedEx
 use dictation_coordinator::diagnostics::{Diagnostics, RecordingNotifier};
 use dictation_domain::chord::ChordFilter;
 use dictation_domain::config::Config;
-use dictation_domain::config::DeliveryModeSetting;
+use dictation_domain::config::{DeliveryModeSetting, HudPosition};
 use dictation_domain::session::{AppError, DraftReason, Outcome};
 use dictation_domain::{Phase, SessionId};
 use dictation_models::{Cancel, ModelStore};
@@ -215,6 +215,50 @@ fn banner_for(o: &Outcome) -> bool {
     )
 }
 
+/// `ui.show_hud` and `ui.hud_position`, with the defaults if settings are
+/// unavailable.
+fn hud_prefs(app: &AppHandle) -> (bool, HudPosition) {
+    app.try_state::<AppState>()
+        .and_then(|s| {
+            s.store.lock().ok().and_then(|st| {
+                st.as_ref().map(|st| {
+                    let ui = &st.get().ui;
+                    (ui.show_hud, ui.hud_position)
+                })
+            })
+        })
+        .unwrap_or((true, HudPosition::BottomCenter))
+}
+
+/// Logical-pixel inset of the HUD from the work-area edges.
+const HUD_MARGIN: f64 = 24.0;
+
+/// Shows the HUD, first placing it on the display under the pointer when it
+/// was hidden, so it never jumps between displays mid-session. Placement
+/// failures leave the previous position; showing never takes focus
+/// (`focus: false`, `focusable: false` in tauri.conf.json).
+fn show_hud_at(app: &AppHandle, hud: &tauri::WebviewWindow, position: HudPosition) {
+    if !hud.is_visible().unwrap_or(true) {
+        let monitor = app
+            .cursor_position()
+            .ok()
+            .and_then(|p| app.monitor_from_point(p.x, p.y).ok().flatten())
+            .or_else(|| app.primary_monitor().ok().flatten());
+        if let (Some(m), Ok(size)) = (monitor, hud.outer_size()) {
+            let area = m.work_area();
+            let margin = (HUD_MARGIN * m.scale_factor()).round() as u32;
+            let (x, y) = position.place(
+                (area.position.x, area.position.y),
+                (area.size.width, area.size.height),
+                (size.width, size.height),
+                margin,
+            );
+            let _ = hud.set_position(tauri::PhysicalPosition::new(x, y));
+        }
+    }
+    let _ = hud.show();
+}
+
 impl Notifier for TauriNotifier {
     fn phase(&mut self, phase: Phase) {
         let _ = self
@@ -231,25 +275,16 @@ impl Notifier for TauriNotifier {
                 | Phase::Transcribing
                 | Phase::Delivering
         );
-        let show_hud = self
-            .app
-            .try_state::<AppState>()
-            .and_then(|s| {
-                s.store
-                    .lock()
-                    .ok()
-                    .and_then(|st| st.as_ref().map(|st| st.get().ui.show_hud))
-            })
-            .unwrap_or(true);
+        let (show_hud, position) = hud_prefs(&self.app);
         self.hud_seq
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         update_tray_status(&self.app, Some(phase));
         if let Some(hud) = self.app.get_webview_window("hud") {
-            let _ = if busy && show_hud {
-                hud.show()
+            if busy && show_hud {
+                show_hud_at(&self.app, &hud, position);
             } else {
-                hud.hide()
-            };
+                let _ = hud.hide();
+            }
         }
     }
 
@@ -260,16 +295,7 @@ impl Notifier for TauriNotifier {
         let _ = self
             .app
             .emit_to("review", "outcome", OutcomePayload { outcome });
-        let show_hud = self
-            .app
-            .try_state::<AppState>()
-            .and_then(|s| {
-                s.store
-                    .lock()
-                    .ok()
-                    .and_then(|st| st.as_ref().map(|st| st.get().ui.show_hud))
-            })
-            .unwrap_or(true);
+        let (show_hud, position) = hud_prefs(&self.app);
         if !show_hud || !banner_for(&outcome) {
             return;
         }
@@ -281,7 +307,7 @@ impl Notifier for TauriNotifier {
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
             + 1;
         if let Some(hud) = self.app.get_webview_window("hud") {
-            let _ = hud.show();
+            show_hud_at(&self.app, &hud, position);
         }
         let (app, hud_seq) = (self.app.clone(), Arc::clone(&self.hud_seq));
         std::thread::spawn(move || {

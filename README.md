@@ -84,7 +84,7 @@ If the app can't paste safely, the text becomes a **draft**. That happens when y
 
 Open **Settings…** from the tray menu:
 
-- **General:** status HUD, reduced motion, launch at login.
+- **General:** status HUD and its position, reduced motion, launch at login. The HUD's × button cancels dictation.
 - **Recording:** microphone, silence timeout (0.5–2.5 s), no-speech timeout, continuous dictation, microphone test.
 - **Shortcuts:** start/finish, cancel and an optional paste-draft shortcut.
 - **Models:** language, model download, import, verify, unload.

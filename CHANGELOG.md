@@ -17,6 +17,11 @@ All notable changes to Local Dictation are documented here. The format follows [
 
 ## [Unreleased]
 
+### Added
+
+- **Cancel button on the status HUD.** Click × while listening or transcribing to cancel, the same as the cancel shortcut. Nothing is pasted. ADR-015.
+- **Status HUD position.** Settings → General → *Status indicator position*: bottom center (default), top center, or a corner. The HUD appears on the display under the pointer. Settings schema v4; older settings files are migrated automatically.
+
 ## [0.10.2] - 2026-11-14
 
 ### Added

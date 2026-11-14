@@ -24,7 +24,7 @@
         "label": "hud",
         "title": "Dictation status",
         "url": "hud.html",
-        "width": 240,
+        "width": 280,
         "height": 56,
         "visible": false,
         "focus": false,
@@ -36,7 +36,7 @@
         "resizable": false,
         "shadow": false,
         "visibleOnAllWorkspaces": true,
-        "acceptFirstMouse": false
+        "acceptFirstMouse": true
       },
       {
         "label": "review",

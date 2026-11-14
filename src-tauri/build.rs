@@ -1,7 +1,7 @@
 #[allow(clippy::panic)] // build scripts report failure by panicking
 fn main() {
     // Every app command gets an explicit permission so capabilities can scope
-    // them per window (the HUD gets none; docs/06 §4).
+    // them per window (the HUD gets only cancel_dictation; docs/06 §4, ADR-015).
     let manifest = tauri_build::AppManifest::new().commands(&[
         "get_snapshot",
         "start_dictation",
