@@ -360,7 +360,13 @@ fn run<P: TargetPlatform>(
                         return Err(check_error(c));
                     }
                     if !p.modifiers_released(MODIFIER_TIMEOUT) {
-                        trace(id, "prepare: modifiers", &"still held");
+                        if *TRACE {
+                            trace(
+                                id,
+                                "prepare: modifiers still held",
+                                &dictation_platform::modifier_trace(),
+                            );
+                        }
                         return Err(AppError::ModifiersHeld);
                     }
                     if is_canceled(id) {
@@ -395,6 +401,9 @@ fn run<P: TargetPlatform>(
                     Ok(DispatchOutcome::Uncertain) | Err(_) => DispatchResult::Uncertain,
                 };
                 trace(id, "dispatch", &result);
+                if *TRACE {
+                    trace(id, "after dispatch", &dictation_platform::modifier_trace());
+                }
                 // The token lives until the reducer's ReleaseTarget: a
                 // continuous session (ADR-014) re-validates the target for
                 // its next phrase. Every send still needs its own Prepare +

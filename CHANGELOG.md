@@ -25,7 +25,7 @@ All notable changes to Local Dictation are documented here. The format follows [
 
 ### Fixed
 
-- **macOS: continuous dictation turned every phrase after the first into a draft.** The app's own ⌘V for phrase 1 left the Command flag set in macOS's keyboard state, so before phrase 2 the app thought you were still holding the shortcut keys and skipped the paste. The app now reads the physical Command, Shift, Option and Control keys instead of that flag.
+- **macOS: continuous dictation turned every phrase after the first into a draft.** ("The shortcut keys were still held".) The app's ⌘V for phrase 1 sent only a V key marked with Command, never a Command press and release, and macOS then kept reporting Command as held. The app now sends Command down, V, Command up, as it already did with Ctrl on Windows, and checks the physical modifier keys before each paste.
 - **Continuous dictation: editors that recreate their text field after a paste.** If an editor gives the field a new internal identity after a paste, it no longer matched the field recorded at the shortcut press. The app now records the field again right after each paste, as long as you're still in the same app. Switching to another field or app still stops automatic paste. ADR-014 amendment.
 - **Continuous dictation stopped after the first phrase.** The hidden review window refreshes after every result, and that refresh counted as "review opened", which ends a continuous session. Now only a visible review or settings window counts.
 
