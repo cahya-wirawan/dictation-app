@@ -75,6 +75,16 @@ Open the draft from the menu bar with **Review text…**. From there you can edi
 | Nothing happens on the shortcut | Check the menu bar tooltip. If it says *Setup needed*, finish setup. Otherwise check for a shortcut conflict. |
 | Text appears in the wrong language | Set the language explicitly. Auto-detection on very short phrases is unreliable. |
 
+### Delivery trace
+
+If text goes to a draft and you can't tell why, quit the app and start it with a trace:
+
+```sh
+open --env DICTATION_TRACE_DELIVERY=1 --stderr ~/dictation-trace.log -a "/Applications/Local Dictation.app"
+```
+
+Reproduce the problem, then attach `~/dictation-trace.log` to your report. It lists only the result of each paste-safety check (for example `FieldChanged`), never your text, app names or window titles.
+
 ### Support report
 
 **Settings → About → Support report → Preview report**, then **Save report…**. The report contains versions, settings values, permission and error codes, and timing summaries. It never contains what you said, audio, app or window names, device names or file paths. Nothing is uploaded; you choose where to save it and whom to send it to.

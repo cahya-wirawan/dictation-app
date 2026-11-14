@@ -23,6 +23,8 @@ use crate::*;
 
 /// kVK_ANSI_V. Layout-independent virtual key code for the physical V key.
 const KEY_V: u16 = 9;
+/// kVK_Command (left Command).
+const KEY_COMMAND: u16 = 0x37;
 
 pub struct TargetSnapshot {
     pub app: AppIdentity,
@@ -243,13 +245,24 @@ pub fn check_target(start: &TargetSnapshot) -> TargetCheck {
     }
 }
 
+/// Virtual key codes of the left and right Command, Shift, Option and Control
+/// keys (HIToolbox `kVK_*`).
+const MODIFIER_KEYS: [u16; 8] = [0x37, 0x36, 0x38, 0x3C, 0x3A, 0x3D, 0x3B, 0x3E];
+
+/// Whether the user physically holds Command, Shift, Option or Control.
+///
+/// Reads each modifier key's up/down state rather than the HID system flags:
+/// our own Cmd+V carries the Command *flag* on the V events, and macOS keeps
+/// that flag in the HID system flags state after the chord, so a flags check
+/// reported Command as held for every phrase after the first paste of a
+/// continuous session. We never post a modifier key event, so the per-key
+/// state reflects only real keys.
 pub fn physical_modifiers_down() -> Option<bool> {
-    let flags = CGEventSource::flags_state(CGEventSourceStateID::HIDSystemState);
-    let mask = CGEventFlags::MaskCommand
-        | CGEventFlags::MaskControl
-        | CGEventFlags::MaskAlternate
-        | CGEventFlags::MaskShift;
-    Some(flags.intersects(mask))
+    Some(
+        MODIFIER_KEYS
+            .iter()
+            .any(|&k| CGEventSource::key_state(CGEventSourceStateID::HIDSystemState, k)),
+    )
 }
 
 /// Writes plain Unicode text only. Returns the new change count, which acts as
@@ -266,24 +279,64 @@ pub fn clipboard_write_text(text: &str) -> Result<i64, PlatformError> {
     Ok(pb.changeCount() as i64)
 }
 
-/// Posts exactly one Cmd+V (key down + key up). The Command flag is carried on
-/// the V events themselves, so no modifier key is ever synthesized and nothing
-/// the user holds is released. Key-up is always attempted.
+/// Posts exactly one Cmd+V: Command down, V down, V up, Command up — the same
+/// sequence as the Windows adapter's Ctrl+V.
+///
+/// It runs only after `wait_modifiers_released` saw no modifier held, so the
+/// Command release pairs with our own Command press and never releases a key
+/// the user holds (docs/05 §5 step 3). An earlier version carried the Command
+/// flag on the V events alone; nothing then cleared that flag, and macOS kept
+/// reporting Command as held, which blocked every later phrase of a continuous
+/// session. Every key-up is always attempted.
 pub fn send_paste_chord() -> Result<DispatchOutcome, PlatformError> {
     if accessibility_permission() != Permission::Granted {
         return Err(PlatformError::NotTrusted);
     }
-    let down = CGEvent::new_keyboard_event(None, KEY_V, true);
-    let up = CGEvent::new_keyboard_event(None, KEY_V, false);
-    let (Some(down), Some(up)) = (down, up) else {
-        return Ok(DispatchOutcome::Uncertain);
+    let events = [
+        (KEY_COMMAND, true, CGEventFlags::MaskCommand),
+        (KEY_V, true, CGEventFlags::MaskCommand),
+        (KEY_V, false, CGEventFlags::MaskCommand),
+        (KEY_COMMAND, false, CGEventFlags(0)),
+    ]
+    .map(|(key, down, flags)| {
+        let e = CGEvent::new_keyboard_event(None, key, down);
+        if let Some(e) = &e {
+            CGEvent::set_flags(Some(e), flags);
+        }
+        e
+    });
+    let [Some(cmd_down), Some(v_down), Some(v_up), Some(cmd_up)] = events else {
+        return Ok(DispatchOutcome::Uncertain); // nothing posted
     };
-    CGEvent::set_flags(Some(&down), CGEventFlags::MaskCommand);
-    CGEvent::set_flags(Some(&up), CGEventFlags::MaskCommand);
-    CGEvent::post(CGEventTapLocation::HIDEventTap, Some(&down));
-    CGEvent::post(CGEventTapLocation::HIDEventTap, Some(&up));
-    // CGEventPost returns void: "Sent" means only that both events were posted.
+    for e in [&cmd_down, &v_down, &v_up, &cmd_up] {
+        CGEvent::post(CGEventTapLocation::HIDEventTap, Some(e));
+    }
+    // CGEventPost returns void: "Sent" means only that the events were posted.
     Ok(DispatchOutcome::Sent)
+}
+
+/// Diagnostics only (delivery trace): which modifier keys and flags macOS
+/// reports as down. Key names and flag bits only.
+pub fn modifier_trace() -> String {
+    const NAMES: [&str; 8] = [
+        "cmd",
+        "right-cmd",
+        "shift",
+        "right-shift",
+        "option",
+        "right-option",
+        "ctrl",
+        "right-ctrl",
+    ];
+    let keys: Vec<&str> = MODIFIER_KEYS
+        .iter()
+        .zip(NAMES)
+        .filter(|(k, _)| CGEventSource::key_state(CGEventSourceStateID::HIDSystemState, **k))
+        .map(|(_, n)| n)
+        .collect();
+    let hid = CGEventSource::flags_state(CGEventSourceStateID::HIDSystemState).0;
+    let session = CGEventSource::flags_state(CGEventSourceStateID::CombinedSessionState).0;
+    format!("keys down {keys:?}, HID flags {hid:#x}, session flags {session:#x}")
 }
 
 /// Diagnostics only: the focused element's AXValue as text, used by the M0

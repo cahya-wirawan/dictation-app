@@ -19,9 +19,14 @@ All notable changes to Local Dictation are documented here. The format follows [
 
 ## [0.10.2] - 2026-11-14
 
+### Added
+
+- `DICTATION_TRACE_DELIVERY=1` prints the result of each paste-safety check to stderr, for bug reports. It prints only check names such as `FieldChanged`: no text, app names or window titles.
+
 ### Fixed
 
-- **Continuous dictation turned every phrase after the first into a draft** ("the focused app changed"). Some editors give the text field a new internal identity after a paste, so it no longer matched the field recorded at the shortcut press. The app now records the field again right after each paste, as long as you're still in the same app. Switching to another field or app still stops automatic paste. ADR-014 amendment.
+- **macOS: continuous dictation turned every phrase after the first into a draft.** ("The shortcut keys were still held".) The app's ⌘V for phrase 1 sent only a V key marked with Command, never a Command press and release, and macOS then kept reporting Command as held. The app now sends Command down, V, Command up, as it already did with Ctrl on Windows, and checks the physical modifier keys before each paste.
+- **Continuous dictation: editors that recreate their text field after a paste.** If an editor gives the field a new internal identity after a paste, it no longer matched the field recorded at the shortcut press. The app now records the field again right after each paste, as long as you're still in the same app. Switching to another field or app still stops automatic paste. ADR-014 amendment.
 - **Continuous dictation stopped after the first phrase.** The hidden review window refreshes after every result, and that refresh counted as "review opened", which ends a continuous session. Now only a visible review or settings window counts.
 
 ## [0.10.1] - 2026-11-14

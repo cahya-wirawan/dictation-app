@@ -128,5 +128,18 @@ pub fn wait_modifiers_released(timeout: Duration) -> bool {
     }
 }
 
+/// Diagnostics only: what the OS reports about modifier keys, for the
+/// delivery trace. Key names and flag bits; never text or identities.
+pub fn modifier_trace() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        macos::modifier_trace()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        format!("held: {:?}", physical_modifiers_down())
+    }
+}
+
 /// Default modifier-release budget (docs/05 §4 step 5).
 pub const MODIFIER_RELEASE_TIMEOUT: Duration = Duration::from_millis(1500);
