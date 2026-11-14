@@ -17,6 +17,10 @@ All notable changes to Local Dictation are documented here. The format follows [
 
 ## [Unreleased]
 
+### Fixed
+
+- **Continuous dictation stopped after the first phrase.** The hidden review window refreshes after every result, and that refresh counted as "review opened", which ends a continuous session. Now only a visible review or settings window counts.
+
 ## [0.10.1] - 2026-11-14
 
 ### Fixed
