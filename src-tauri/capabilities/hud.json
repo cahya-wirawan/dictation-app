@@ -1,7 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "hud-window",
-  "description": "HUD: receives phase/level events only. No commands.",
-  "windows": ["hud"],
-  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
+  "description": "HUD: receives phase/level events; its only command is cancel_dictation (ADR-015).",
+  "windows": [
+    "hud"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-cancel-dictation"
+  ]
 }

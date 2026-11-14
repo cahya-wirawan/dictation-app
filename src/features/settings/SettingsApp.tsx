@@ -21,6 +21,7 @@ import {
   unloadModel,
   updateSettings,
   type Config,
+  type HudPosition,
   type InputDevice,
   type Outcome,
   type Permissions,
@@ -184,6 +185,15 @@ export function SettingsApp() {
   );
 }
 
+const HUD_POSITIONS: readonly (readonly [HudPosition, string])[] = [
+  ["bottom_center", "Bottom center"],
+  ["top_center", "Top center"],
+  ["top_left", "Top left"],
+  ["top_right", "Top right"],
+  ["bottom_left", "Bottom left"],
+  ["bottom_right", "Bottom right"],
+];
+
 interface PageProps {
   cfg: Config;
   patch: (p: SettingsPatch) => void;
@@ -196,6 +206,13 @@ function General({ cfg, patch, setCfg, onError }: PageProps & { setCfg: (c: Conf
       <label className="check">
         <input type="checkbox" checked={cfg.ui.show_hud} onChange={(e) => { patch({ ui: { show_hud: e.target.checked } }); }} />
         Show the status indicator while dictating
+      </label>
+      <label>
+        Status indicator position
+        <select value={cfg.ui.hud_position} disabled={!cfg.ui.show_hud}
+          onChange={(e) => { patch({ ui: { hud_position: e.target.value as HudPosition } }); }}>
+          {HUD_POSITIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
       </label>
       <label className="check">
         <input type="checkbox" checked={cfg.ui.reduced_motion} onChange={(e) => { patch({ ui: { reduced_motion: e.target.checked } }); }} />

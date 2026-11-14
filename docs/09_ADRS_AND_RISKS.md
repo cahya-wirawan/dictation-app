@@ -88,6 +88,16 @@ Accepted. Requested by the user after the first field report, where one shortcut
   - *Scope:* the window for absorbing a change is the moment right after the app's own paste. Every later change, including another field in the same app, still makes the next phrase a draft.
   - *Tests:* scripted-platform tests cover both cases. The first phrase is still checked against the token captured at the press.
 
+## ADR-015 — HUD Cancel button and position presets
+
+Accepted. Requested by the user. The HUD gets a Cancel (×) button, and Settings gets a HUD position choice. This amends docs/06 §1 and §4 ("HUD: no commands") for exactly one command.
+
+- **Cancel only.** The button calls `cancel_dictation`, the same command as the tray's Cancel and the cancel shortcut. Cancel discards the session and never pastes. A click on the HUD can activate the app on macOS and take focus from the target, but no paste follows, so a click cannot misdirect text. A Stop button would have to paste the phrase in flight after that focus change, so it was not added.
+- **Capability.** `capabilities/hud.json` adds only `allow-cancel-dictation`. The HUD still gets no draft, settings, clipboard, model or window commands. Every other command from the HUD is still rejected.
+- **Window.** `acceptFirstMouse` is on, so the first click on the HUD of an inactive app presses the button. The HUD is still created with `focus: false` and `focusable: false`, and showing it never takes focus.
+- **Position.** `ui.hud_position` (config schema v4) picks one of six presets: bottom center (the default, docs/02 §1), top center, or a corner. The HUD is placed in the work area of the display under the pointer, 24 logical pixels from the edges, when it appears; it does not move during a session. Dragging was rejected: it needs mouse interaction with the HUD during a session, and in continuous dictation the resulting focus change would turn the next phrase into a draft.
+- **Evidence.** Unit tests cover the schema migration and the placement geometry. The click behavior and placement are not yet verified on a real desktop.
+
 ## Risk register
 
 | Risk | Likelihood / impact | Mitigation and owner role |

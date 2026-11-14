@@ -98,7 +98,7 @@ type AppError = {
 };
 ```
 
-Events: phase_changed, readiness_changed, mic_level, model_progress, draft_available, operation_failed. `draft_available` carries ID, expiry and reason, not text. HUD receives only phase, elapsed time, normalized level and hints. Sequence numbers let clients detect gaps and call get_snapshot; snapshots are authoritative after reconnect. Never assume the webview was open when a transition occurred.
+Events: phase_changed, readiness_changed, mic_level, model_progress, draft_available, operation_failed. `draft_available` carries ID, expiry and reason, not text. HUD receives only phase, elapsed time, normalized level and hints; its only command is `cancel_dictation` (ADR-015). Sequence numbers let clients detect gaps and call get_snapshot; snapshots are authoritative after reconnect. Never assume the webview was open when a transition occurred.
 
 ## 5. Native worker wire protocol
 
@@ -131,6 +131,6 @@ Hard cancellation: invalidate the job, close pipes and kill the worker process; 
 
 This is an application schema example, not a Tauri configuration snippet. OS adapters map normalized chords to actual key representations. `device_id: null` means select/confirm the system default during setup; once selected, persist best-effort device identity and require reselection when missing. No target token, transcript, PCM, clipboard snapshot or permissions grant is persisted. Read OS permission state rather than trusting a saved grant.
 
-*Implemented schema (v3):* v2 added `ui.onboarding_complete` and `ui.reduced_motion`; v3 added `audio.continuous` (ADR-014, default `false`). Older files are migrated forward one version at a time.
+*Implemented schema (v4):* v2 added `ui.onboarding_complete` and `ui.reduced_motion`; v3 added `audio.continuous` (ADR-014, default `false`); v4 added `ui.hud_position` (`bottom_center` default, `top_center`, `top_left`, `top_right`, `bottom_left`, `bottom_right`). Older files are migrated forward one version at a time.
 
 Write config to a private temporary sibling and atomically replace after validation. Detect corrupt or future schemas, retain a backup, and offer reset rather than destructive downgrade. Model inventory is separate; transient `.partial` files never count as installed models.

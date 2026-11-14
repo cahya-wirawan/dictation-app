@@ -172,8 +172,8 @@ The normal interaction has no main window. A menu-bar/tray icon exposes status, 
 | Surface | Content | Focus policy |
 |---|---|---|
 | Tray menu | Readiness, current mode, commands | Opening it may change focus; active session target is then revalidated |
-| Listening HUD | Mic icon, “Listening”, level bars, elapsed time, stop hint | Native non-activating, no keyboard focus |
-| Transcribing HUD | “Transcribing locally…”, elapsed processing time, cancel hint | No focus and no guessed percentage |
+| Listening HUD | Mic icon, “Listening”, level bars, elapsed time, stop hint, Cancel (×) button (ADR-015) | Native non-activating, no keyboard focus |
+| Transcribing HUD | “Transcribing locally…”, elapsed processing time, cancel hint, Cancel (×) button (ADR-015) | No focus and no guessed percentage |
 | Draft banner | “Text ready — target changed. Review or paste with your shortcut.” | No automatic editor opening |
 | Review window | Editable draft, Copy, Discard, retention countdown | Deliberately takes focus; automatic delivery is disabled |
 | Settings | Devices, shortcut, models, language, silence, permissions, privacy | Ordinary accessible window |
@@ -442,7 +442,7 @@ type AppError = {
 };
 ```
 
-Events: phase_changed, readiness_changed, mic_level, model_progress, draft_available, operation_failed. `draft_available` carries ID, expiry and reason, not text. HUD receives only phase, elapsed time, normalized level and hints. Sequence numbers let clients detect gaps and call get_snapshot; snapshots are authoritative after reconnect. Never assume the webview was open when a transition occurred.
+Events: phase_changed, readiness_changed, mic_level, model_progress, draft_available, operation_failed. `draft_available` carries ID, expiry and reason, not text. HUD receives only phase, elapsed time, normalized level and hints; its only command is `cancel_dictation` (ADR-015). Sequence numbers let clients detect gaps and call get_snapshot; snapshots are authoritative after reconnect. Never assume the webview was open when a transition occurred.
 
 ## 5. Native worker wire protocol
 
@@ -475,7 +475,7 @@ Hard cancellation: invalidate the job, close pipes and kill the worker process; 
 
 This is an application schema example, not a Tauri configuration snippet. OS adapters map normalized chords to actual key representations. `device_id: null` means select/confirm the system default during setup; once selected, persist best-effort device identity and require reselection when missing. No target token, transcript, PCM, clipboard snapshot or permissions grant is persisted. Read OS permission state rather than trusting a saved grant.
 
-*Implemented schema (v3):* v2 added `ui.onboarding_complete` and `ui.reduced_motion`; v3 added `audio.continuous` (ADR-014, default `false`). Older files are migrated forward one version at a time.
+*Implemented schema (v4):* v2 added `ui.onboarding_complete` and `ui.reduced_motion`; v3 added `audio.continuous` (ADR-014, default `false`); v4 added `ui.hud_position` (`bottom_center` default, `top_center`, `top_left`, `top_right`, `bottom_left`, `bottom_right`). Older files are migrated forward one version at a time.
 
 Write config to a private temporary sibling and atomically replace after validation. Detect corrupt or future schemas, retain a backup, and offer reset rather than destructive downgrade. Model inventory is separate; transient `.partial` files never count as installed models.
 
@@ -587,7 +587,7 @@ Tauri capabilities constrain frontend IPC; they do not sandbox mistakes in Rust 
 |---|---|
 | Settings webview | Read status/config, validated setting changes, explicit model/permission operations |
 | Review webview | Authorized draft ID/revision, bounded edit/copy/discard |
-| HUD webview | Status and meter only; no draft, clipboard, device/model path or process APIs |
+| HUD webview | Status and meter, plus one command, `cancel_dictation` (ADR-015); no draft, clipboard, device/model path or process APIs |
 | Rust host | Native capture, policy, target validation, clipboard/input, worker lifecycle |
 | Worker | Verified model read and session PCM over inherited pipes; no intended network use |
 
@@ -894,6 +894,16 @@ Accepted. Requested by the user after the first field report, where one shortcut
   - *Rule:* 150 ms after a sent paste, the delivery thread re-reads the target and replaces the token. This happens only if the focus is still in the same app (a field or window identity change is absorbed; a different app is not), the new field is editable and not excluded, and the session was not canceled. Otherwise the old token stays and the next phrase fails its check, which gives a draft.
   - *Scope:* the window for absorbing a change is the moment right after the app's own paste. Every later change, including another field in the same app, still makes the next phrase a draft.
   - *Tests:* scripted-platform tests cover both cases. The first phrase is still checked against the token captured at the press.
+
+## ADR-015 — HUD Cancel button and position presets
+
+Accepted. Requested by the user. The HUD gets a Cancel (×) button, and Settings gets a HUD position choice. This amends docs/06 §1 and §4 ("HUD: no commands") for exactly one command.
+
+- **Cancel only.** The button calls `cancel_dictation`, the same command as the tray's Cancel and the cancel shortcut. Cancel discards the session and never pastes. A click on the HUD can activate the app on macOS and take focus from the target, but no paste follows, so a click cannot misdirect text. A Stop button would have to paste the phrase in flight after that focus change, so it was not added.
+- **Capability.** `capabilities/hud.json` adds only `allow-cancel-dictation`. The HUD still gets no draft, settings, clipboard, model or window commands. Every other command from the HUD is still rejected.
+- **Window.** `acceptFirstMouse` is on, so the first click on the HUD of an inactive app presses the button. The HUD is still created with `focus: false` and `focusable: false`, and showing it never takes focus.
+- **Position.** `ui.hud_position` (config schema v4) picks one of six presets: bottom center (the default, docs/02 §1), top center, or a corner. The HUD is placed in the work area of the display under the pointer, 24 logical pixels from the edges, when it appears; it does not move during a session. Dragging was rejected: it needs mouse interaction with the HUD during a session, and in continuous dictation the resulting focus change would turn the next phrase into a draft.
+- **Evidence.** Unit tests cover the schema migration and the placement geometry. The click behavior and placement are not yet verified on a real desktop.
 
 ## Risk register
 

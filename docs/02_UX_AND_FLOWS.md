@@ -7,8 +7,8 @@ The normal interaction has no main window. A menu-bar/tray icon exposes status, 
 | Surface | Content | Focus policy |
 |---|---|---|
 | Tray menu | Readiness, current mode, commands | Opening it may change focus; active session target is then revalidated |
-| Listening HUD | Mic icon, “Listening”, level bars, elapsed time, stop hint | Native non-activating, no keyboard focus |
-| Transcribing HUD | “Transcribing locally…”, elapsed processing time, cancel hint | No focus and no guessed percentage |
+| Listening HUD | Mic icon, “Listening”, level bars, elapsed time, stop hint, Cancel (×) button (ADR-015) | Native non-activating, no keyboard focus |
+| Transcribing HUD | “Transcribing locally…”, elapsed processing time, cancel hint, Cancel (×) button (ADR-015) | No focus and no guessed percentage |
 | Draft banner | “Text ready — target changed. Review or paste with your shortcut.” | No automatic editor opening |
 | Review window | Editable draft, Copy, Discard, retention countdown | Deliberately takes focus; automatic delivery is disabled |
 | Settings | Devices, shortcut, models, language, silence, permissions, privacy | Ordinary accessible window |

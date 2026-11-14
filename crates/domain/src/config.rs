@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 const MAX_EXCLUDED_APPS: usize = 64;
 const MAX_STRING: usize = 256;
 
@@ -96,6 +96,66 @@ pub struct UiConfig {
     pub onboarding_complete: bool,
     /// Schema v2. In-app preference in addition to the OS setting.
     pub reduced_motion: bool,
+    /// Schema v4. Where the HUD appears on the display under the pointer.
+    pub hud_position: HudPosition,
+}
+
+/// Schema v4. HUD placement within the display's work area (docs/02 §1:
+/// lower center by default). A preset rather than free dragging: dragging
+/// needs mouse focus on the HUD, which must never take focus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HudPosition {
+    BottomCenter,
+    TopCenter,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+impl HudPosition {
+    /// Top-left corner for a `size` window inside the work area at `origin`
+    /// with `area` size, inset by `margin` from the chosen edges. All values in
+    /// physical pixels. A window larger than the area is pinned to its start.
+    pub fn place(
+        self,
+        origin: (i32, i32),
+        area: (u32, u32),
+        size: (u32, u32),
+        margin: u32,
+    ) -> (i32, i32) {
+        let axis = |start: i32, area: u32, size: u32, align: Align| -> i32 {
+            let free = i64::from(area.saturating_sub(size));
+            let margin = i64::from(margin).min(free / 2);
+            let offset = match align {
+                Align::Start => margin,
+                Align::Center => free / 2,
+                Align::End => free - margin,
+            };
+            i32::try_from(i64::from(start) + offset).unwrap_or(start)
+        };
+        use Align::{Center, End, Start};
+        let (h, v) = match self {
+            Self::BottomCenter => (Center, End),
+            Self::TopCenter => (Center, Start),
+            Self::TopLeft => (Start, Start),
+            Self::TopRight => (End, Start),
+            Self::BottomLeft => (Start, End),
+            Self::BottomRight => (End, End),
+        };
+        (
+            axis(origin.0, area.0, size.0, h),
+            axis(origin.1, area.1, size.1, v),
+        )
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Align {
+    Start,
+    Center,
+    End,
 }
 
 impl Default for Config {
@@ -131,6 +191,7 @@ impl Default for Config {
                 locale: "en".into(),
                 onboarding_complete: false,
                 reduced_motion: false,
+                hud_position: HudPosition::BottomCenter,
             },
         }
     }
@@ -294,6 +355,7 @@ fn migrate(mut value: Value, from: u32) -> Result<Value, ConfigError> {
         value = match version {
             1 => v1_to_v2(value)?,
             2 => v2_to_v3(value)?,
+            3 => v3_to_v4(value)?,
             other => {
                 return Err(ConfigError::Corrupt(format!(
                     "unknown schema_version {other}"
@@ -327,6 +389,18 @@ fn v2_to_v3(mut v: Value) -> Result<Value, ConfigError> {
         .ok_or_else(|| ConfigError::Corrupt("v2 config without audio".into()))?;
     audio.entry("continuous").or_insert(Value::Bool(false));
     v["schema_version"] = Value::from(3u32);
+    Ok(v)
+}
+
+/// v4 adds `ui.hud_position` (bottom center, the docs/02 placement).
+fn v3_to_v4(mut v: Value) -> Result<Value, ConfigError> {
+    let ui = v
+        .get_mut("ui")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| ConfigError::Corrupt("v3 config without ui".into()))?;
+    ui.entry("hud_position")
+        .or_insert(Value::from("bottom_center"));
+    v["schema_version"] = Value::from(4u32);
     Ok(v)
 }
 
@@ -477,8 +551,8 @@ mod tests {
     #[test]
     fn future_and_corrupt_schemas() {
         assert_eq!(
-            Config::from_json(r#"{"schema_version": 4}"#),
-            Err(ConfigError::FutureSchema(4))
+            Config::from_json(r#"{"schema_version": 5}"#),
+            Err(ConfigError::FutureSchema(5))
         );
         assert!(matches!(
             Config::from_json("{not json"),
@@ -505,8 +579,9 @@ mod tests {
             "shortcuts":{"toggle":"Ctrl+Alt+Space","cancel":"Ctrl+Alt+Escape","paste_draft":null},
             "ui":{"show_hud":false,"launch_at_login":false,"locale":"en"}}"#;
         let c = Config::from_json(v1).unwrap();
-        assert_eq!(c.schema_version, 3);
+        assert_eq!(c.schema_version, SCHEMA_VERSION);
         assert_eq!(c.revision, 7, "migration keeps the revision");
+        assert_eq!(c.ui.hud_position, HudPosition::BottomCenter);
         assert!(!c.audio.continuous);
         assert_eq!(
             (c.audio.silence_ms, c.transcription.language.as_str()),
@@ -527,8 +602,9 @@ mod tests {
         v2["schema_version"] = json!(2);
         v2["revision"] = json!(4);
         v2["audio"].as_object_mut().unwrap().remove("continuous");
+        v2["ui"].as_object_mut().unwrap().remove("hud_position");
         let c = Config::from_json(&v2.to_string()).unwrap();
-        assert_eq!((c.schema_version, c.revision), (3, 4));
+        assert_eq!((c.schema_version, c.revision), (SCHEMA_VERSION, 4));
         assert!(!c.audio.continuous, "upgrades keep the previous behavior");
         let c = c
             .apply_patch(4, &json!({"audio": {"continuous": true}}))
@@ -538,5 +614,46 @@ mod tests {
             Config::from_json(r#"{"schema_version":2,"revision":1}"#),
             Err(ConfigError::Corrupt(_))
         ));
+    }
+
+    #[test]
+    fn migrates_v3_to_v4_and_patches_hud_position() {
+        let mut v3: Value = serde_json::from_str(&Config::default().to_json()).unwrap();
+        v3["schema_version"] = json!(3);
+        v3["ui"].as_object_mut().unwrap().remove("hud_position");
+        let c = Config::from_json(&v3.to_string()).unwrap();
+        assert_eq!(c.schema_version, 4);
+        assert_eq!(c.ui.hud_position, HudPosition::BottomCenter);
+        let c = c
+            .apply_patch(c.revision, &json!({"ui": {"hud_position": "top_right"}}))
+            .unwrap();
+        assert_eq!(c.ui.hud_position, HudPosition::TopRight);
+        assert!(
+            c.apply_patch(c.revision, &json!({"ui": {"hud_position": "middle"}}))
+                .is_err(),
+            "unknown positions are rejected"
+        );
+    }
+
+    #[test]
+    fn hud_positions_stay_inside_the_work_area() {
+        // A 1440x900 area below a 25 px menu bar, 240x56 HUD, 24 px margin.
+        let place = |p: HudPosition| p.place((0, 25), (1440, 875), (240, 56), 24);
+        assert_eq!(place(HudPosition::BottomCenter), (600, 25 + 875 - 56 - 24));
+        assert_eq!(place(HudPosition::TopCenter), (600, 25 + 24));
+        assert_eq!(place(HudPosition::TopLeft), (24, 49));
+        assert_eq!(place(HudPosition::TopRight), (1440 - 240 - 24, 49));
+        assert_eq!(place(HudPosition::BottomLeft), (24, 820));
+        assert_eq!(place(HudPosition::BottomRight), (1176, 820));
+        // Secondary display left of the primary (negative origin).
+        assert_eq!(
+            HudPosition::TopLeft.place((-1920, 0), (1920, 1080), (240, 56), 24),
+            (-1896, 24)
+        );
+        // Too small an area: no overflow, never outside the start edge.
+        assert_eq!(
+            HudPosition::BottomRight.place((0, 0), (100, 40), (240, 56), 24),
+            (0, 0)
+        );
     }
 }

@@ -10,7 +10,7 @@ Tauri capabilities constrain frontend IPC; they do not sandbox mistakes in Rust 
 |---|---|
 | Settings webview | Read status/config, validated setting changes, explicit model/permission operations |
 | Review webview | Authorized draft ID/revision, bounded edit/copy/discard |
-| HUD webview | Status and meter only; no draft, clipboard, device/model path or process APIs |
+| HUD webview | Status and meter, plus one command, `cancel_dictation` (ADR-015); no draft, clipboard, device/model path or process APIs |
 | Rust host | Native capture, policy, target validation, clipboard/input, worker lifecycle |
 | Worker | Verified model read and session PCM over inherited pipes; no intended network use |
 
