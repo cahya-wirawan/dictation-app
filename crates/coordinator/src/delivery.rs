@@ -31,6 +31,12 @@ use crate::actor::{AdapterEvent, DeliveryAdapter, Msg};
 /// docs/05 §4 step 5.
 pub const MODIFIER_TIMEOUT: Duration = Duration::from_millis(1500);
 
+/// How long after a sent paste the target token is re-read (ADR-014
+/// amendment). Editors may give the focused field or window a new
+/// accessibility identity once its content changes; the next phrase of a
+/// continuous session is validated against the field as it is after the paste.
+pub const TOKEN_REFRESH_DELAY: Duration = Duration::from_millis(150);
+
 /// Terminal emulators are excluded from automatic delivery by default
 /// (docs/05 §5): a pasted newline can execute a command. Matched by native
 /// app identity (bundle id), never by window title.
@@ -250,6 +256,34 @@ fn excluded_app<P: TargetPlatform>(p: &P, t: &P::Token, user: &SharedExclusions)
             .unwrap_or(true)
 }
 
+/// Re-reads the target right after a sent paste so later phrases compare
+/// against the field as it is now. Only a change of identity inside the same
+/// app is absorbed, and only in the moment right after our own paste; a
+/// different app, an unreadable target or a field that can no longer take
+/// text keeps the old token, which then fails the next check (draft).
+fn refresh_token<P: TargetPlatform>(
+    p: &mut P,
+    tokens: &mut HashMap<SessionId, P::Token>,
+    id: SessionId,
+    excluded: &SharedExclusions,
+) {
+    let Some(old) = tokens.get(&id) else { return };
+    thread::sleep(TOKEN_REFRESH_DELAY);
+    if !matches!(
+        p.check(old),
+        TargetCheck::Same | TargetCheck::FieldChanged | TargetCheck::WindowChanged
+    ) {
+        return;
+    }
+    let Ok(new) = p.capture() else { return };
+    if p.field(&new) == FieldClass::Editable
+        && !excluded_app(p, &new, excluded)
+        && p.check(&new) == TargetCheck::Same
+    {
+        tokens.insert(id, new);
+    }
+}
+
 fn run<P: TargetPlatform>(
     mut p: P,
     rx: &Receiver<Req>,
@@ -320,9 +354,12 @@ fn run<P: TargetPlatform>(
                     Ok(DispatchOutcome::Uncertain) | Err(_) => DispatchResult::Uncertain,
                 };
                 // The token lives until the reducer's ReleaseTarget: a
-                // continuous session (ADR-014) re-validates the same target
-                // for its next phrase. Every send still needs its own
-                // Prepare + commit, so keeping it cannot cause a second paste.
+                // continuous session (ADR-014) re-validates the target for
+                // its next phrase. Every send still needs its own Prepare +
+                // commit, so keeping it cannot cause a second paste.
+                if result == DispatchResult::Sent && !is_canceled(id) {
+                    refresh_token(&mut p, &mut tokens, id, excluded);
+                }
                 let _ = events.send(Msg::Adapter(AdapterEvent::DispatchFinished {
                     id,
                     generation,

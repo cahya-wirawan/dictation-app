@@ -82,6 +82,11 @@ Accepted. Requested by the user after the first field report, where one shortcut
 - **Not streaming.** ADR-003 stands: each phrase is finalized before it is pasted, and no partial text is inserted or revised.
 - **Risk.** While the mode is on, speech not meant as dictation, such as a conversation or a call, gets pasted. Mitigations: opt-in, the HUD is visible while listening, the shortcut stops it, and it stops by itself after the no-speech timeout.
 - **Evidence.** Reducer fixtures and the fuzz test check that each phrase dispatches at most once, that every transcription has accepted speech, and that no utterance is transcribed twice. DSP segment tests and actor tests with a scripted platform cover the rest. Not yet verified on a real desktop.
+- **Amendment (14 November 2026, v0.10.2): the token is refreshed after each sent paste.**
+  - *Problem:* field report on macOS (v0.10.1). Phrase 2 always became a `TargetChanged` draft, because the editor's focused field had a new accessibility identity after phrase 1's paste.
+  - *Rule:* 150 ms after a sent paste, the delivery thread re-reads the target and replaces the token. This happens only if the focus is still in the same app (a field or window identity change is absorbed; a different app is not), the new field is editable and not excluded, and the session was not canceled. Otherwise the old token stays and the next phrase fails its check, which gives a draft.
+  - *Scope:* the window for absorbing a change is the moment right after the app's own paste. Every later change, including another field in the same app, still makes the next phrase a draft.
+  - *Tests:* scripted-platform tests cover both cases. The first phrase is still checked against the token captured at the press.
 
 ## Risk register
 

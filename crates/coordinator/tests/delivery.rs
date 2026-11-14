@@ -46,6 +46,9 @@ struct World {
     /// Simulate the user switching apps right after the clipboard write.
     switch_on_write: Option<Target>,
     send_result: DispatchOutcome,
+    /// Simulate an editor whose focused field gets a new accessibility
+    /// identity after every paste (same app, same place for the user).
+    new_identity_on_paste: bool,
     /// Every paste chord: (focused target, clipboard content at that time).
     pastes: Vec<(Target, Option<String>)>,
 }
@@ -62,6 +65,7 @@ impl Default for World {
             clipboard_fails: false,
             switch_on_write: None,
             send_result: DispatchOutcome::Sent,
+            new_identity_on_paste: false,
             pastes: vec![],
         }
     }
@@ -132,6 +136,9 @@ impl TargetPlatform for FakePlatform {
         let mut w = self.0.lock().unwrap();
         let entry = (w.focus, w.clipboard.clone());
         w.pastes.push(entry);
+        if w.new_identity_on_paste {
+            w.focus.field += 100;
+        }
         Ok(w.send_result)
     }
 }
@@ -692,6 +699,47 @@ fn continuous_focus_change_turns_the_next_phrase_into_a_draft_and_closes_the_mic
         std::thread::sleep(Duration::from_millis(10));
     }
     assert_eq!(r.h.snapshot(T).unwrap().phase, Phase::DraftReady);
+}
+
+#[test]
+fn continuous_follows_a_field_whose_identity_changes_after_each_paste() {
+    // Field report (v0.10.1, macOS): phrase 2 always became a TargetChanged
+    // draft because the editor's field had a new AX identity after phrase 1.
+    let world = World {
+        new_identity_on_paste: true,
+        ..World::default()
+    };
+    let r = Rig::with_audio(world, Duration::from_millis(10), two_phrases_then_silence());
+    r.h.send(Command::SetContinuous(true));
+    r.h.send(Command::Toggle);
+    assert_eq!(r.outcome(), Outcome::PasteSent);
+    assert_eq!(r.outcome(), Outcome::PasteSent);
+    r.wait_phase(Phase::Idle);
+    let fields: Vec<_> = r.pastes().iter().map(|(t, _)| *t).collect();
+    assert_eq!(
+        fields,
+        vec![T1, Target { app: 1, field: 101 }],
+        "both phrases pasted, the second into the refreshed field"
+    );
+}
+
+#[test]
+fn continuous_switch_to_another_field_after_a_paste_is_still_a_draft() {
+    let r = Rig::with_audio(
+        World::default(),
+        Duration::from_millis(10),
+        two_phrases_then_silence(),
+    );
+    r.h.send(Command::SetContinuous(true));
+    r.h.send(Command::Toggle);
+    assert_eq!(r.outcome(), Outcome::PasteSent);
+    // Same app, different field, after the post-paste refresh.
+    r.world.lock().unwrap().focus = Target { app: 1, field: 7 };
+    assert_eq!(
+        r.outcome(),
+        Outcome::DraftReady(DraftReason::Blocked(AppError::TargetChanged))
+    );
+    assert_eq!(r.pastes().len(), 1, "nothing pasted into the other field");
 }
 
 #[test]

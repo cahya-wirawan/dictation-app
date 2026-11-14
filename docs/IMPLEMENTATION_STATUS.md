@@ -65,6 +65,13 @@ Opt-in setting `audio.continuous` (schema v3). Implemented across the layers:
 
 Tests: 9 reducer fixtures, and the fuzz test now also drives continuous sessions (about 100 chained phrases per run, no duplicate dispatch, no inference without accepted speech, no utterance transcribed twice). Also 2 DSP segmenting tests and 4 actor tests with the scripted platform: two phrases into the same target, stop by shortcut, focus change → draft with the mic closed, copy-only ignores the setting. **Not yet run on a real desktop.**
 
+Field reports on an Intel Mac (14 November 2026) found two bugs that the headless tests could not:
+
+1. **v0.10.0/v0.10.1: the session ended after the first phrase.** The hidden `review` webview refreshes on every outcome, and `get_draft` sent `ReviewOpened` for it. Fixed: only a visible window sends it (#27).
+2. **v0.10.1 with fix 1: every phrase after the first became a `TargetChanged` draft.** The editor's focused field had a new AX identity after the paste. Fixed by the post-paste token refresh (ADR-014 amendment, `delivery::refresh_token`), with 2 scripted-platform tests.
+
+Continuous dictation is still unverified after these fixes.
+
 ## Universal macOS build (after M7, ADR-013)
 
 The macOS DMG is universal: arm64 + x86_64.
