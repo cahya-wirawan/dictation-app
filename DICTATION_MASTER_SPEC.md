@@ -903,7 +903,7 @@ Accepted. Requested by the user. The HUD gets a Cancel (×) button, and Settings
 - **Capability.** `capabilities/hud.json` adds only `allow-cancel-dictation`. The HUD still gets no draft, settings, clipboard, model or window commands. Every other command from the HUD is still rejected.
 - **Window.** `acceptFirstMouse` is on, so the first click on the HUD of an inactive app presses the button. The HUD is still created with `focus: false` and `focusable: false`, and showing it never takes focus.
 - **Position.** `ui.hud_position` (config schema v4) picks one of six presets: bottom center (the default, docs/02 §1), top center, or a corner. The HUD is placed in the work area of the display under the pointer, 24 logical pixels from the edges, when it appears; it does not move during a session. Dragging was rejected: it needs mouse interaction with the HUD during a session, and in continuous dictation the resulting focus change would turn the next phrase into a draft.
-- **Evidence.** Unit tests cover the schema migration and the placement geometry. The click behavior and placement are not yet verified on a real desktop.
+- **Evidence.** Unit tests cover the schema migration and the placement geometry. Field test on macOS (14 November 2026): × cancels while listening and transcribing, and the position presets work. Clicking × does activate the app: TextEdit is no longer the active app afterwards, as expected above. No paste follows a cancel, so this costs one click back into the editor.
 
 ## Risk register
 

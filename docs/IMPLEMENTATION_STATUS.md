@@ -58,7 +58,7 @@ Lockfiles: `Cargo.lock`, `pnpm-lock.yaml`.
 
 - **Cancel:** the HUD shows a × button while starting, listening, finalizing, transcribing or delivering. It calls `cancel_dictation`, the HUD's only granted command (`capabilities/hud.json`). `acceptFirstMouse` is on so the first click on the inactive HUD registers.
 - **Position:** `ui.hud_position` (schema v4, `v3_to_v4` migration) with six presets. `show_hud_at` in `src-tauri/src/lib.rs` places the HUD in the work area of the display under the pointer when it goes from hidden to shown. The geometry is `HudPosition::place` in `crates/domain/src/config.rs`, unit-tested. The HUD window is 280 px wide (was 240) to fit the button.
-- **Not yet verified on a real desktop:** whether clicking × on macOS activates the app (harmless for Cancel, see ADR-015), placement on multi-display setups and on Windows.
+- **Field test on macOS (14 November 2026):** × cancels and the position presets work. Clicking × activates the app, so the editor is no longer active afterwards (expected, see ADR-015). Not yet verified: multi-display placement and Windows.
 
 ## Continuous dictation (after v0.9.0, ADR-014)
 
