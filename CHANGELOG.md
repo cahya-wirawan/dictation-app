@@ -17,6 +17,8 @@ All notable changes to Local Dictation are documented here. The format follows [
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-11-14
+
 ### Fixed
 
 - **Continuous dictation turned every phrase after the first into a draft** ("the focused app changed"). Some editors give the text field a new internal identity after a paste, so it no longer matched the field recorded at the shortcut press. The app now records the field again right after each paste, as long as you're still in the same app. Switching to another field or app still stops automatic paste. ADR-014 amendment.
@@ -224,7 +226,8 @@ Milestone M0 feasibility spike, partially complete. See `docs/IMPLEMENTATION_STA
 - No dictation session flow yet: there is no coordinator, config persistence, model manager or onboarding (milestone M1 and later).
 - Performance numbers so far come from a Linux x86_64 development host, not the reference hardware.
 
-[Unreleased]: https://github.com/cahya-wirawan/dictation-app/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/cahya-wirawan/dictation-app/compare/v0.10.2...HEAD
+[0.10.2]: https://github.com/cahya-wirawan/dictation-app/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/cahya-wirawan/dictation-app/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/cahya-wirawan/dictation-app/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/cahya-wirawan/dictation-app/compare/v0.8.0...v0.9.0
