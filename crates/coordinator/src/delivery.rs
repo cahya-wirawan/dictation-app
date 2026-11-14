@@ -18,7 +18,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -36,6 +36,18 @@ pub const MODIFIER_TIMEOUT: Duration = Duration::from_millis(1500);
 /// accessibility identity once its content changes; the next phrase of a
 /// continuous session is validated against the field as it is after the paste.
 pub const TOKEN_REFRESH_DELAY: Duration = Duration::from_millis(150);
+
+/// Opt-in field diagnostics: `DICTATION_TRACE_DELIVERY=1` prints each
+/// delivery check's result name (e.g. `FieldChanged`) to stderr. It never
+/// prints text, app names, window titles or any target identity.
+static TRACE: LazyLock<bool> =
+    LazyLock::new(|| std::env::var_os("DICTATION_TRACE_DELIVERY").is_some_and(|v| v == "1"));
+
+fn trace(id: SessionId, stage: &str, detail: &dyn std::fmt::Debug) {
+    if *TRACE {
+        eprintln!("[delivery] session {id:?} {stage}: {detail:?}");
+    }
+}
 
 /// Terminal emulators are excluded from automatic delivery by default
 /// (docs/05 §5): a pasted newline can execute a command. Matched by native
@@ -269,17 +281,28 @@ fn refresh_token<P: TargetPlatform>(
 ) {
     let Some(old) = tokens.get(&id) else { return };
     thread::sleep(TOKEN_REFRESH_DELAY);
+    let c = p.check(old);
+    trace(id, "refresh: old token", &c);
     if !matches!(
-        p.check(old),
+        c,
         TargetCheck::Same | TargetCheck::FieldChanged | TargetCheck::WindowChanged
     ) {
         return;
     }
-    let Ok(new) = p.capture() else { return };
-    if p.field(&new) == FieldClass::Editable
-        && !excluded_app(p, &new, excluded)
-        && p.check(&new) == TargetCheck::Same
-    {
+    let Ok(new) = p.capture() else {
+        trace(id, "refresh: capture", &"failed");
+        return;
+    };
+    let field = p.field(&new);
+    let excluded = excluded_app(p, &new, excluded);
+    let c = p.check(&new);
+    let accepted = field == FieldClass::Editable && !excluded && c == TargetCheck::Same;
+    trace(
+        id,
+        "refresh: new token",
+        &format_args!("{field:?} excluded={excluded} check={c:?} accepted={accepted}"),
+    );
+    if accepted {
         tokens.insert(id, new);
     }
 }
@@ -298,15 +321,25 @@ fn run<P: TargetPlatform>(
                 tokens.remove(&id);
                 let ok = match p.capture() {
                     Ok(t) => {
-                        let usable = p.field(&t) == FieldClass::Editable
-                            && !excluded_app(&p, &t, excluded)
-                            && p.check(&t) == TargetCheck::Same;
+                        let field = p.field(&t);
+                        let excl = excluded_app(&p, &t, excluded);
+                        let c = p.check(&t);
+                        trace(
+                            id,
+                            "capture",
+                            &format_args!("{field:?} excluded={excl} check={c:?}"),
+                        );
+                        let usable =
+                            field == FieldClass::Editable && !excl && c == TargetCheck::Same;
                         if usable {
                             tokens.insert(id, t);
                         }
                         usable
                     }
-                    Err(_) => false,
+                    Err(e) => {
+                        trace(id, "capture failed", &e);
+                        false
+                    }
                 };
                 let _ = reply.send(ok);
             }
@@ -317,8 +350,12 @@ fn run<P: TargetPlatform>(
                 events,
             } => {
                 let result = (|| {
-                    let t = tokens.get(&id).ok_or(AppError::PasteUnsupported)?;
+                    let Some(t) = tokens.get(&id) else {
+                        trace(id, "prepare", &"no token");
+                        return Err(AppError::PasteUnsupported);
+                    };
                     let c = p.check(t);
+                    trace(id, "prepare: before clipboard", &c);
                     if c != TargetCheck::Same {
                         return Err(check_error(c));
                     }
@@ -331,6 +368,7 @@ fn run<P: TargetPlatform>(
                     p.write_clipboard(&text)?;
                     // Clipboard mutation cannot be atomic with focus: recheck.
                     let c = p.check(t);
+                    trace(id, "prepare: after clipboard", &c);
                     if c != TargetCheck::Same {
                         return Err(check_error(c));
                     }
@@ -353,6 +391,7 @@ fn run<P: TargetPlatform>(
                     Ok(DispatchOutcome::Sent) => DispatchResult::Sent,
                     Ok(DispatchOutcome::Uncertain) | Err(_) => DispatchResult::Uncertain,
                 };
+                trace(id, "dispatch", &result);
                 // The token lives until the reducer's ReleaseTarget: a
                 // continuous session (ADR-014) re-validates the target for
                 // its next phrase. Every send still needs its own Prepare +
@@ -367,6 +406,7 @@ fn run<P: TargetPlatform>(
                 }));
             }
             Req::Release { id } => {
+                trace(id, "release", &"token dropped");
                 tokens.remove(&id);
             }
             Req::Copy {
