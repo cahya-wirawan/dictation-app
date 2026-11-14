@@ -454,15 +454,21 @@ fn cancel_dictation(state: State<'_, AppState>) {
     state.handle.send(Command::Cancel);
 }
 
-/// Settings/review window only (capability-scoped). Opening review revokes
-/// automatic delivery for an in-flight session (docs/04 invariant 9).
+/// Settings/review window only (capability-scoped). Reading the draft from a
+/// window the user can see revokes automatic delivery for an in-flight
+/// session (docs/04 invariant 9). Hidden windows also refresh on every outcome
+/// event; that is not the user opening review, and it must not end a
+/// continuous session (ADR-014). `show_review` sends `ReviewOpened` itself.
 #[tauri::command]
 async fn get_draft(
     window: tauri::WebviewWindow,
     state: State<'_, AppState>,
 ) -> Result<Option<DraftView>, String> {
     draft_window(&window)?;
-    state.handle.send(Command::ReviewOpened);
+    // Unknown visibility counts as visible: revoking is the safe side.
+    if window.is_visible().unwrap_or(true) {
+        state.handle.send(Command::ReviewOpened);
+    }
     let expires_in_ms = state
         .handle
         .snapshot(IPC_TIMEOUT)
