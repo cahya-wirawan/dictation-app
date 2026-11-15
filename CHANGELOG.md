@@ -17,6 +17,8 @@ All notable changes to Local Dictation are documented here. The format follows [
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-15
+
 ### Added
 
 - **Allow automatic paste into a terminal**, for example to dictate into vim. Settings → Delivery → *Allow automatic paste into these terminals*: choose a terminal and confirm. In a terminal, line breaks, tabs and other control characters are replaced with spaces, so a paste never presses Enter. Your exclusion list still takes priority. Settings schema v5. ADR-016.
@@ -250,7 +252,8 @@ Milestone M0 feasibility spike, partially complete. See `docs/IMPLEMENTATION_STA
 - No dictation session flow yet: there is no coordinator, config persistence, model manager or onboarding (milestone M1 and later).
 - Performance numbers so far come from a Linux x86_64 development host, not the reference hardware.
 
-[Unreleased]: https://github.com/cahya-wirawan/dictation-app/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/cahya-wirawan/dictation-app/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/cahya-wirawan/dictation-app/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/cahya-wirawan/dictation-app/compare/v0.10.2...v0.11.0
 [0.10.2]: https://github.com/cahya-wirawan/dictation-app/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/cahya-wirawan/dictation-app/compare/v0.10.0...v0.10.1

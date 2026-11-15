@@ -915,7 +915,7 @@ Accepted. Requested by the user to dictate into vim running in Terminal. docs/05
 - **No line breaks.** In a paste into any terminal, every control character (line feed, carriage return, tab, escape and the rest) and every Unicode line or paragraph separator becomes a space. So a paste can never press Enter, trigger tab completion or start an escape sequence. This is the "tested profile". The draft text keeps the original.
 - **Unchanged.** All other delivery safeguards apply to terminals as to any app: the same field, released modifiers, the clipboard recheck, one paste chord and no automatic Enter.
 - **Risk.** Dictated words land on a shell prompt if that is what has the focus. Without a line break nothing runs until the user presses Enter, and the user chose this per terminal after a warning.
-- **Evidence.** Config tests (migration, only known terminals), scripted-platform tests (a trusted terminal pastes, another terminal and a user-excluded trusted terminal do not) and a unit test of the character replacement. Not yet verified on a real desktop.
+- **Evidence.** Config tests (migration, only known terminals), scripted-platform tests (a trusted terminal pastes, another terminal and a user-excluded trusted terminal do not) and a unit test of the character replacement. Verified on macOS (15 November 2026): with Terminal trusted, dictation pastes into vim in insert mode. Other terminals and Windows are not yet verified.
 
 ## Risk register
 
