@@ -59,7 +59,8 @@ Lockfiles: `Cargo.lock`, `pnpm-lock.yaml`.
 - **Setting:** `delivery.trusted_terminals` (schema v5, `v4_to_v5`). Validation accepts only `TERMINAL_APPS`, which moved from the coordinator to `crates/domain/src/config.rs`; `delivery::DEFAULT_EXCLUDED_APPS` re-exports it.
 - **Delivery:** `SharedExclusions` is now `Arc<Mutex<DeliveryLists>>` (exclusions and trusted terminals). `excluded_app` lets a trusted terminal through unless the user excluded it. `prepare` passes text for any terminal through `terminal_safe`, which turns control characters and U+2028/U+2029 into spaces.
 - **UI:** Settings → Delivery lists the terminals for the platform; enabling one needs an inline **Allow**.
-- **Tests:** config migration and validation, 2 scripted-platform tests. Not yet verified on a real desktop.
+- **Tests:** config migration and validation, 2 scripted-platform tests.
+- **Field test on macOS (15 November 2026):** with Terminal trusted, dictation pastes into vim in insert mode. Not yet verified: other terminals and Windows.
 
 ## HUD Cancel button and position (after v0.10.2, ADR-015)
 
