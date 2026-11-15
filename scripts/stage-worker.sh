@@ -9,8 +9,14 @@ PROFILE="${PROFILE:-release}"
 TRIPLE="${TARGET:-$(rustc -vV | sed -n 's/^host: //p')}"
 build() {
   local args=(-p transcription-worker --bin dictation-worker --target "$1")
+  local features="${WORKER_FEATURES:-}"
+  # Apple Silicon workers use Metal (whisper.cpp falls back to the CPU if it
+  # cannot start). Intel Macs stay on the CPU. DICTATION_METAL=0 turns it off.
+  if [[ "$1" == aarch64-apple-darwin && "${DICTATION_METAL:-1}" != 0 ]]; then
+    features="${features:+$features,}metal"
+  fi
   [[ "$PROFILE" == release ]] && args+=(--release)
-  [[ -n "${WORKER_FEATURES:-}" ]] && args+=(--features "$WORKER_FEATURES")
+  [[ -n "$features" ]] && args+=(--features "$features")
   cargo build "${args[@]}"
 }
 mkdir -p src-tauri/binaries

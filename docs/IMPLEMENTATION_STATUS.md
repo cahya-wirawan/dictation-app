@@ -54,6 +54,12 @@ The Tauri crate compiles and links on macOS, and the bundle layout is correct.
 
 Lockfiles: `Cargo.lock`, `pnpm-lock.yaml`.
 
+## Metal on Apple Silicon (after v0.12.0, ADR-017)
+
+- `scripts/stage-worker.sh` builds the arm64 worker with `--features metal`. `build.rs` now links `clang_rt.osx`, without which Metal failed to link (`__isPlatformVersionAtLeast`).
+- Measured on the M2 Pro (details in ADR-017): warm 99 ms vs 368 ms on CPU, cold start 312 ms vs 527 ms, peak RSS 332 vs 243 MiB.
+- Not yet verified: the app with Metal in a GUI session, and the CPU fallback on a machine without Metal.
+
 ## Trusted terminals (after v0.11.0, ADR-016)
 
 - **Setting:** `delivery.trusted_terminals` (schema v5, `v4_to_v5`). Validation accepts only `TERMINAL_APPS`, which moved from the coordinator to `crates/domain/src/config.rs`; `delivery::DEFAULT_EXCLUDED_APPS` re-exports it.
@@ -305,7 +311,7 @@ The exit criterion is "deterministic state/audio fixtures and no idle capture" (
 - **No sleep/lock/logout hook yet.** `Input::Suspend` exists and is tested; the OS notification adapter still has to call it.
 - **IPC request ids are not deduplicated yet** (docs/04 §3), and TypeScript bindings are still hand-written in `src/ipc.ts`.
 - **The coordinator lives in `crates/coordinator`**, not `src-tauri/src/coordinator/` as docs/03 §2 suggests, so it can be tested without a webview (docs/07 §5).
-- **The worker respawns in the background after every hard cancel.** On CPU that takes about 165 ms. With Metal it would take about 5 s, so Metal stays off.
+- **The worker respawns in the background after every hard cancel.** On CPU that takes about 165 ms. With Metal it took about 5 s in M1, so Metal stayed off; ADR-017 re-measured it and turned it on for Apple Silicon.
 
 **Bug found by the tests:** effects that fed follow-up inputs straight back into the reducer reported `Listening` before `Starting` to the UI. The actor now queues follow-up inputs until all of the current input's effects have run.
 
@@ -336,7 +342,7 @@ Portable worker build (`DICTATION_GGML_NATIVE=OFF`; ggml with Accelerate), JFK f
 | Metal (`--features metal`) | **5,259 ms** | first job 616 ms, then 108–111 ms | ≈ 0.01 |
 
 - When model tests run in parallel, CPU contention inflates the warm numbers to 0.4–5.6 s. Measure in isolation.
-- Metal's cold load is about 5 s, and every hard cancel kills and respawns the worker. With Metal on, a cancel would add about 5 s before the next dictation can start, unless the next worker is pre-spawned or Metal's shader-compilation cache can be reused. Investigate before Metal becomes a default; CPU already meets the 10 s stop-to-dispatch target with a wide margin.
+- Superseded by ADR-017: with whisper.cpp v1.9.5 the Metal cold start is 312 ms and the warm 11 s fixture 99 ms on this machine. The M1 note was: Metal's cold load is about 5 s, and every hard cancel kills and respawns the worker. With Metal on, a cancel would add about 5 s before the next dictation can start, unless the next worker is pre-spawned or Metal's shader-compilation cache can be reused. Investigate before Metal becomes a default; CPU already meets the 10 s stop-to-dispatch target with a wide margin.
 - Release bundle: `Local Dictation.app` is 11.7 MiB, version 0.1.0, with the arm64 `dictation-worker` sidecar in `Contents/MacOS`. It is ad-hoc linker-signed with identifier `dictation_app-<hash>`, not the bundle id; real signing must set the identity and entitlements.
 - Not yet measured: peak RSS of parent plus worker, trigger latency, idle CPU (docs/08 §5).
 

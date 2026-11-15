@@ -17,6 +17,10 @@ All notable changes to Local Dictation are documented here. The format follows [
 
 ## [Unreleased]
 
+### Changed
+
+- **Apple Silicon Macs transcribe on the GPU (Metal).** On an M2 Pro an 11-second phrase now takes about 0.1 s instead of 0.4 s. Intel Macs, Windows and Linux still use the CPU. ADR-017.
+
 ## [0.12.0] - 2026-11-15
 
 ### Added

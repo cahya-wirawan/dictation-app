@@ -296,8 +296,13 @@ fn jfk_fixture_transcribes_offline_on_cpu() {
 #[test]
 fn hard_cancel_kills_reaps_and_restarts() {
     let Some((path, sha)) = model() else { return };
-    // 30 s of audio so inference is still running when we cancel.
-    let pcm: Vec<f32> = jfk_pcm().into_iter().cycle().take(16_000 * 30).collect();
+    // The longest allowed job, so inference is still running when we cancel,
+    // even with Metal (30 s takes about 0.3 s there, 120 s about 1.2 s).
+    let pcm: Vec<f32> = jfk_pcm()
+        .into_iter()
+        .cycle()
+        .take(MAX_SAMPLES as usize)
+        .collect();
     let mut c = WorkerClient::spawn(&worker_exe(), 20, T).unwrap();
     c.load_model(&path, &sha, Duration::from_secs(60)).unwrap();
     let pid = c.pid().unwrap();
