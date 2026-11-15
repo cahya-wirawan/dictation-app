@@ -217,6 +217,13 @@ fn banner_for(o: &Outcome) -> bool {
     )
 }
 
+/// A start refused because a draft is waiting opens Review, so the press is
+/// never silently ignored and the user can copy or discard the draft there
+/// (docs/02 §4). It is the user's own shortcut press, so taking focus is fine.
+fn opens_review(o: &Outcome) -> bool {
+    matches!(o, Outcome::Rejected(AppError::DraftPending))
+}
+
 /// `ui.show_hud` and `ui.hud_position`, with the defaults if settings are
 /// unavailable.
 fn hud_prefs(app: &AppHandle) -> (bool, HudPosition) {
@@ -297,6 +304,9 @@ impl Notifier for TauriNotifier {
         let _ = self
             .app
             .emit_to("review", "outcome", OutcomePayload { outcome });
+        if opens_review(&outcome) {
+            show_review(&self.app);
+        }
         let (show_hud, position) = hud_prefs(&self.app);
         if !show_hud || !banner_for(&outcome) {
             return;
