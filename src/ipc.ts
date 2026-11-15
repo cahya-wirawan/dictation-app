@@ -77,11 +77,11 @@ export interface DraftView {
 export type HudPosition = "bottom_center" | "top_center" | "top_left" | "top_right" | "bottom_left" | "bottom_right";
 
 export interface Config {
-  schema_version: 4;
+  schema_version: 5;
   revision: number;
   audio: { device_id: string | null; silence_ms: number; no_speech_timeout_ms: number; max_capture_ms: number; continuous: boolean };
   transcription: { model_id: string; language: string; backend: "auto" | "cpu" | "metal" };
-  delivery: { mode: "auto_paste" | "copy_only"; clipboard_policy: "leave_text" | "preserve"; excluded_apps: string[] };
+  delivery: { mode: "auto_paste" | "copy_only"; clipboard_policy: "leave_text" | "preserve"; excluded_apps: string[]; trusted_terminals: string[] };
   shortcuts: { toggle: string; cancel: string; paste_draft: string | null };
   ui: { show_hud: boolean; launch_at_login: boolean; locale: string; onboarding_complete: boolean; reduced_motion: boolean; hud_position: HudPosition };
 }

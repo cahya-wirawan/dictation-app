@@ -214,7 +214,7 @@ Model deletion/switching is disabled while its worker job is active. Apply micro
 - Opening Review intentionally opts out of pending automatic paste. Editing a draft creates a new draft revision; a stale delivery request must fail validation.
 - Starting while a draft exists shows “Review, copy, or discard your previous text first.” It must not discard silently.
 - Start/stop sounds are off by default; if enabled, stop the start cue before opening capture so it is not recorded. Do not use an inference-complete sound that hides delivery failure.
-- Never append Enter/Return. Preserve transcript line breaks only; no automatic message send or terminal execution.
+- Never append Enter/Return. Preserve transcript line breaks only; no automatic message send or terminal execution. Exception: a paste into a trusted terminal replaces line breaks and other control characters with spaces (ADR-016).
 - Do not silently retry after a paste attempt: a receiving editor may already contain the text.
 
 ## 5. Status and error copy
@@ -475,7 +475,7 @@ Hard cancellation: invalidate the job, close pipes and kill the worker process; 
 
 This is an application schema example, not a Tauri configuration snippet. OS adapters map normalized chords to actual key representations. `device_id: null` means select/confirm the system default during setup; once selected, persist best-effort device identity and require reselection when missing. No target token, transcript, PCM, clipboard snapshot or permissions grant is persisted. Read OS permission state rather than trusting a saved grant.
 
-*Implemented schema (v4):* v2 added `ui.onboarding_complete` and `ui.reduced_motion`; v3 added `audio.continuous` (ADR-014, default `false`); v4 added `ui.hud_position` (`bottom_center` default, `top_center`, `top_left`, `top_right`, `bottom_left`, `bottom_right`). Older files are migrated forward one version at a time.
+*Implemented schema (v5):* v2 added `ui.onboarding_complete` and `ui.reduced_motion`; v3 added `audio.continuous` (ADR-014, default `false`); v4 added `ui.hud_position` (`bottom_center` default, `top_center`, `top_left`, `top_right`, `bottom_left`, `bottom_right`); v5 added `delivery.trusted_terminals` (ADR-016, default empty). Older files are migrated forward one version at a time.
 
 Write config to a private temporary sibling and atomically replace after validation. Detect corrupt or future schemas, retain a backup, and offer reset rather than destructive downgrade. Model inventory is separate; transient `.partial` files never count as installed models.
 
@@ -550,7 +550,7 @@ Algorithm:
 8. Always release only synthetic keys issued by this transaction, including on API error. Record sent/uncertain based on actual API return. Never infer document acceptance from SendInput success.
 9. Clear active audio/text from app memory after a sent outcome; show “Paste sent.” On blocked/uncertain result retain a draft with outcome metadata and require explicit action for resend.
 
-No automatic Enter. Multiline paste can still have application-specific effects, especially in terminals; terminal targets are excluded from automatic delivery by default. User may enable a named, tested terminal profile after a separate confirmation about pasted commands/newlines. Exclusions are evaluated by native app identity, not a window title alone.
+No automatic Enter. Multiline paste can still have application-specific effects, especially in terminals; terminal targets are excluded from automatic delivery by default. User may enable a named, tested terminal profile after a separate confirmation about pasted commands/newlines (implemented as `delivery.trusted_terminals`, ADR-016). Exclusions are evaluated by native app identity, not a window title alone.
 
 ## 6. Optional clipboard preservation
 
@@ -886,7 +886,7 @@ Accepted. Requested by the user after the first field report, where one shortcut
 - **Delivery.** Each phrase is its own delivery transaction with a fresh generation and its own ledger: target re-validation, released modifiers, clipboard write, recheck, commit, one paste chord. All phrases target the token captured at the start press, which is released only when the session ends. If a phrase hits a changed target, a secure field or an uncertain send, or Review is opened, that phrase becomes a draft and the session ends: the microphone closes and utterances not yet transcribed are discarded. A cancel after commit lets the committed phrase go out (`CancelTooLate`) and nothing after it.
 - **Requires automatic paste.** With copy-only, or a target that does not allow automatic paste, the setting is ignored and the session behaves as before: one utterance, then a draft.
 - **Microphone.** "No idle capture" still holds. The microphone is open only while a session is active, and the HUD shows it. The DSP guarantee "microphone closed before the terminal event" now covers the capture's terminal event only. Per-utterance `Segment` events are reported while it is open, and inference runs while it is open.
-- **Separator.** Every phrase after the first is pasted with a leading space, because it follows text the session already pasted. The exceptions are scripts written without spaces between sentences (CJK, Thai, Lao, Khmer, Myanmar) and text that starts with closing punctuation. The text kept for a draft never has the space. Added in v0.11.0 after a field report.
+- **Separator.** Every phrase after the first is pasted with a leading space, because it follows text the session already pasted. The exceptions are scripts written without spaces between sentences (CJK, Thai, Lao, Khmer, Myanmar) and text that starts with closing punctuation. The text kept for a draft never has the space. Added in v0.11.0 after a field report, and verified on macOS (TextEdit, 15 November 2026).
 - **Not streaming.** ADR-003 stands: each phrase is finalized before it is pasted, and no partial text is inserted or revised.
 - **Risk.** While the mode is on, speech not meant as dictation, such as a conversation or a call, gets pasted. Mitigations: opt-in, the HUD is visible while listening, the shortcut stops it, and it stops by itself after the no-speech timeout.
 - **Evidence.** Reducer fixtures and the fuzz test check that each phrase dispatches at most once, that every transcription has accepted speech, and that no utterance is transcribed twice. DSP segment tests and actor tests with a scripted platform cover the rest. Not yet verified on a real desktop.
@@ -905,6 +905,17 @@ Accepted. Requested by the user. The HUD gets a Cancel (×) button, and Settings
 - **Window.** `acceptFirstMouse` is on, so the first click on the HUD of an inactive app presses the button. The HUD is still created with `focus: false` and `focusable: false`, and showing it never takes focus.
 - **Position.** `ui.hud_position` (config schema v4) picks one of six presets: bottom center (the default, docs/02 §1), top center, or a corner. The HUD is placed in the work area of the display under the pointer, 24 logical pixels from the edges, when it appears; it does not move during a session. Dragging was rejected: it needs mouse interaction with the HUD during a session, and in continuous dictation the resulting focus change would turn the next phrase into a draft.
 - **Evidence.** Unit tests cover the schema migration and the placement geometry. Field test on macOS (14 November 2026): × cancels while listening and transcribing, and the position presets work. Clicking × does activate the app: TextEdit is no longer the active app afterwards, as expected above. No paste follows a cancel, so this costs one click back into the editor.
+
+## ADR-016 — Trusted terminals (opt-in automatic paste)
+
+Accepted. Requested by the user to dictate into vim running in Terminal. docs/05 §5 already allows "a named, tested terminal profile after a separate confirmation about pasted commands/newlines"; this ADR records how.
+
+- **Setting.** `delivery.trusted_terminals` (config schema v5, empty by default) lists terminals that may receive automatic paste. Only apps on the built-in terminal list (`TERMINAL_APPS` in `crates/domain/src/config.rs`) are accepted; settings validation rejects anything else. Trust is per app. The user's own exclusion list still wins over trust.
+- **Confirmation.** Settings → Delivery lists the terminals for the current platform. Checking one shows an inline warning that text is pasted wherever the terminal's focus is, including a command prompt, and it is saved only after **Allow**.
+- **No line breaks.** In a paste into any terminal, every control character (line feed, carriage return, tab, escape and the rest) and every Unicode line or paragraph separator becomes a space. So a paste can never press Enter, trigger tab completion or start an escape sequence. This is the "tested profile". The draft text keeps the original.
+- **Unchanged.** All other delivery safeguards apply to terminals as to any app: the same field, released modifiers, the clipboard recheck, one paste chord and no automatic Enter.
+- **Risk.** Dictated words land on a shell prompt if that is what has the focus. Without a line break nothing runs until the user presses Enter, and the user chose this per terminal after a warning.
+- **Evidence.** Config tests (migration, only known terminals), scripted-platform tests (a trusted terminal pastes, another terminal and a user-excluded trusted terminal do not) and a unit test of the character replacement. Not yet verified on a real desktop.
 
 ## Risk register
 

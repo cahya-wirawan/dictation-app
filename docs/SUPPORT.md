@@ -58,7 +58,7 @@ Plain letters, and Shift with a single letter, are not allowed. They would trigg
 Instead of pasting, the app keeps your text as a **draft** and tells you why:
 
 - **You switched app, window or text field** before transcription finished. The app pastes only into the field where you started.
-- **Password fields, terminals, and apps you excluded** never receive automatic paste. Terminals are excluded because a pasted line break can run a command.
+- **Password fields, terminals, and apps you excluded** never receive automatic paste. Terminals are excluded because a pasted line break can run a command. You can allow a terminal under **Settings → Delivery → Allow automatic paste into these terminals**, for example to dictate into vim. Line breaks, tabs and other control characters are then replaced with spaces, so a paste never presses Enter.
 - **You were still holding the shortcut keys** 1.5 s after the text was ready. The app never releases keys you are holding.
 - **The app could not identify the text field.** Some apps don't expose it. Use **Copy** and paste yourself.
 

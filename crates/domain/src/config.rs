@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 const MAX_EXCLUDED_APPS: usize = 64;
 const MAX_STRING: usize = 256;
 
@@ -61,6 +61,44 @@ pub struct DeliveryConfig {
     pub clipboard_policy: ClipboardPolicy,
     /// Native app identities (bundle ids), never window titles.
     pub excluded_apps: Vec<String>,
+    /// Schema v5 (ADR-016). Terminals from [`TERMINAL_APPS`] the user allows
+    /// automatic paste into. Only listed terminals are accepted.
+    pub trusted_terminals: Vec<String>,
+}
+
+/// Terminal emulators: excluded from automatic delivery unless listed in
+/// `delivery.trusted_terminals` (docs/05 §5, ADR-016), because a pasted line
+/// break can run a command. Matched by native app identity, never by window
+/// title: macOS bundle ids, and lower-case executable names on Windows.
+pub const TERMINAL_APPS: &[&str] = &[
+    "com.apple.Terminal",
+    "com.googlecode.iterm2",
+    "dev.warp.Warp-Stable",
+    "io.alacritty",
+    "org.alacritty",
+    "net.kovidgoyal.kitty",
+    "com.mitchellh.ghostty",
+    "co.zeit.hyper",
+    "com.github.wez.wezterm",
+    "org.tabby",
+    "windowsterminal.exe",
+    "openconsole.exe",
+    "conhost.exe",
+    "cmd.exe",
+    "powershell.exe",
+    "pwsh.exe",
+    "wezterm-gui.exe",
+    "alacritty.exe",
+    "mintty.exe",
+    "putty.exe",
+    "kitty.exe",
+    "tabby.exe",
+    "hyper.exe",
+];
+
+/// Whether `app` (a native app identity) is a known terminal emulator.
+pub fn is_terminal(app: &str) -> bool {
+    TERMINAL_APPS.iter().any(|t| t.eq_ignore_ascii_case(app))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -179,6 +217,7 @@ impl Default for Config {
                 mode: DeliveryModeSetting::AutoPaste,
                 clipboard_policy: ClipboardPolicy::LeaveText,
                 excluded_apps: vec![],
+                trusted_terminals: vec![],
             },
             shortcuts: ShortcutConfig {
                 toggle: "Ctrl+Alt+Space".into(),
@@ -260,6 +299,17 @@ impl Config {
         }
         for app in &self.delivery.excluded_apps {
             check_str("delivery.excluded_apps", app)?;
+        }
+        if !self
+            .delivery
+            .trusted_terminals
+            .iter()
+            .all(|t| is_terminal(t))
+        {
+            return Err(invalid(
+                "delivery.trusted_terminals",
+                "only known terminal apps",
+            ));
         }
         check_str("shortcuts.toggle", &self.shortcuts.toggle)?;
         check_str("shortcuts.cancel", &self.shortcuts.cancel)?;
@@ -356,6 +406,7 @@ fn migrate(mut value: Value, from: u32) -> Result<Value, ConfigError> {
             1 => v1_to_v2(value)?,
             2 => v2_to_v3(value)?,
             3 => v3_to_v4(value)?,
+            4 => v4_to_v5(value)?,
             other => {
                 return Err(ConfigError::Corrupt(format!(
                     "unknown schema_version {other}"
@@ -401,6 +452,19 @@ fn v3_to_v4(mut v: Value) -> Result<Value, ConfigError> {
     ui.entry("hud_position")
         .or_insert(Value::from("bottom_center"));
     v["schema_version"] = Value::from(4u32);
+    Ok(v)
+}
+
+/// v5 adds `delivery.trusted_terminals` (empty: terminals stay excluded).
+fn v4_to_v5(mut v: Value) -> Result<Value, ConfigError> {
+    let delivery = v
+        .get_mut("delivery")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| ConfigError::Corrupt("v4 config without delivery".into()))?;
+    delivery
+        .entry("trusted_terminals")
+        .or_insert(Value::Array(vec![]));
+    v["schema_version"] = Value::from(5u32);
     Ok(v)
 }
 
@@ -551,8 +615,8 @@ mod tests {
     #[test]
     fn future_and_corrupt_schemas() {
         assert_eq!(
-            Config::from_json(r#"{"schema_version": 5}"#),
-            Err(ConfigError::FutureSchema(5))
+            Config::from_json(r#"{"schema_version": 6}"#),
+            Err(ConfigError::FutureSchema(6))
         );
         assert!(matches!(
             Config::from_json("{not json"),
@@ -622,7 +686,7 @@ mod tests {
         v3["schema_version"] = json!(3);
         v3["ui"].as_object_mut().unwrap().remove("hud_position");
         let c = Config::from_json(&v3.to_string()).unwrap();
-        assert_eq!(c.schema_version, 4);
+        assert_eq!(c.schema_version, SCHEMA_VERSION);
         assert_eq!(c.ui.hud_position, HudPosition::BottomCenter);
         let c = c
             .apply_patch(c.revision, &json!({"ui": {"hud_position": "top_right"}}))
@@ -654,6 +718,37 @@ mod tests {
         assert_eq!(
             HudPosition::BottomRight.place((0, 0), (100, 40), (240, 56), 24),
             (0, 0)
+        );
+    }
+
+    #[test]
+    fn migrates_v4_to_v5_and_accepts_only_known_terminals() {
+        let mut v4: Value = serde_json::from_str(&Config::default().to_json()).unwrap();
+        v4["schema_version"] = json!(4);
+        v4["delivery"]
+            .as_object_mut()
+            .unwrap()
+            .remove("trusted_terminals");
+        let c = Config::from_json(&v4.to_string()).unwrap();
+        assert_eq!(c.schema_version, 5);
+        assert!(
+            c.delivery.trusted_terminals.is_empty(),
+            "upgrades stay excluded"
+        );
+        let c = c
+            .apply_patch(
+                c.revision,
+                &json!({"delivery": {"trusted_terminals": ["com.apple.terminal", "pwsh.exe"]}}),
+            )
+            .unwrap();
+        assert_eq!(c.delivery.trusted_terminals.len(), 2);
+        assert!(
+            c.apply_patch(
+                c.revision,
+                &json!({"delivery": {"trusted_terminals": ["com.apple.TextEdit"]}})
+            )
+            .is_err(),
+            "only known terminals can be trusted"
         );
     }
 }

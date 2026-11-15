@@ -49,7 +49,7 @@ Model deletion/switching is disabled while its worker job is active. Apply micro
 - Opening Review intentionally opts out of pending automatic paste. Editing a draft creates a new draft revision; a stale delivery request must fail validation.
 - Starting while a draft exists shows “Review, copy, or discard your previous text first.” It must not discard silently.
 - Start/stop sounds are off by default; if enabled, stop the start cue before opening capture so it is not recorded. Do not use an inference-complete sound that hides delivery failure.
-- Never append Enter/Return. Preserve transcript line breaks only; no automatic message send or terminal execution.
+- Never append Enter/Return. Preserve transcript line breaks only; no automatic message send or terminal execution. Exception: a paste into a trusted terminal replaces line breaks and other control characters with spaces (ADR-016).
 - Do not silently retry after a paste attempt: a receiving editor may already contain the text.
 
 ## 5. Status and error copy

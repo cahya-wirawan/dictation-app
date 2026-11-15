@@ -49,35 +49,10 @@ fn trace(id: SessionId, stage: &str, detail: &dyn std::fmt::Debug) {
     }
 }
 
-/// Terminal emulators are excluded from automatic delivery by default
-/// (docs/05 §5): a pasted newline can execute a command. Matched by native
-/// app identity (bundle id), never by window title.
-pub const DEFAULT_EXCLUDED_APPS: &[&str] = &[
-    "com.apple.Terminal",
-    "com.googlecode.iterm2",
-    "dev.warp.Warp-Stable",
-    "io.alacritty",
-    "org.alacritty",
-    "net.kovidgoyal.kitty",
-    "com.mitchellh.ghostty",
-    "co.zeit.hyper",
-    "com.github.wez.wezterm",
-    "org.tabby",
-    // Windows: lower-case executable names (the Windows app identity).
-    "windowsterminal.exe",
-    "openconsole.exe",
-    "conhost.exe",
-    "cmd.exe",
-    "powershell.exe",
-    "pwsh.exe",
-    "wezterm-gui.exe",
-    "alacritty.exe",
-    "mintty.exe",
-    "putty.exe",
-    "kitty.exe",
-    "tabby.exe",
-    "hyper.exe",
-];
+/// Terminal emulators, excluded from automatic delivery unless the user
+/// trusts them (docs/05 §5, ADR-016). Defined in the domain config so settings
+/// validation and delivery use one list.
+pub const DEFAULT_EXCLUDED_APPS: &[&str] = dictation_domain::config::TERMINAL_APPS;
 
 /// Native operations the transaction needs. `Token` may be `!Send`: a
 /// platform instance is created and used only on the delivery thread.
@@ -171,7 +146,32 @@ enum Req {
     },
 }
 
-pub type SharedExclusions = Arc<Mutex<Vec<String>>>;
+/// The user's delivery lists, updated from settings while running.
+#[derive(Debug, Clone, Default)]
+pub struct DeliveryLists {
+    /// `delivery.excluded_apps`: never pasted into, terminals included.
+    pub excluded: Vec<String>,
+    /// `delivery.trusted_terminals` (ADR-016).
+    pub trusted_terminals: Vec<String>,
+}
+
+pub type SharedExclusions = Arc<Mutex<DeliveryLists>>;
+
+/// What a paste into a terminal may contain (ADR-016): every control
+/// character (line breaks, tab, escape) and Unicode line/paragraph separator
+/// becomes a space, so a paste can never press Enter, complete a command or
+/// start an escape sequence. Printable text is unchanged.
+pub fn terminal_safe(text: &str) -> String {
+    text.chars()
+        .map(|c| {
+            if c.is_control() || matches!(c, '\u{2028}' | '\u{2029}') {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect()
+}
 
 pub struct PlatformDelivery {
     tx: Sender<Req>,
@@ -257,15 +257,13 @@ impl DeliveryAdapter for PlatformDelivery {
     }
 }
 
+/// User exclusions always apply; a terminal is excluded unless trusted.
 fn excluded_app<P: TargetPlatform>(p: &P, t: &P::Token, user: &SharedExclusions) -> bool {
     let Some(app) = p.app_id(t) else { return false };
-    DEFAULT_EXCLUDED_APPS
-        .iter()
-        .any(|e| e.eq_ignore_ascii_case(&app))
-        || user
-            .lock()
-            .map(|u| u.iter().any(|e| e.eq_ignore_ascii_case(&app)))
-            .unwrap_or(true)
+    let Ok(lists) = user.lock() else { return true };
+    let listed = |v: &[String]| v.iter().any(|e| e.eq_ignore_ascii_case(&app));
+    listed(&lists.excluded)
+        || (dictation_domain::config::is_terminal(&app) && !listed(&lists.trusted_terminals))
 }
 
 /// Re-reads the target right after a sent paste so later phrases compare
@@ -373,6 +371,15 @@ fn run<P: TargetPlatform>(
                         trace(id, "prepare", &"canceled");
                         return Err(AppError::StaleRequest); // reducer already moved on
                     }
+                    // ADR-016: a trusted terminal never receives a line break.
+                    let terminal = p
+                        .app_id(t)
+                        .is_some_and(|a| dictation_domain::config::is_terminal(&a));
+                    let text = if terminal {
+                        terminal_safe(&text)
+                    } else {
+                        text.clone()
+                    };
                     p.write_clipboard(&text)
                         .inspect_err(|e| trace(id, "prepare: clipboard", e))?;
                     // Clipboard mutation cannot be atomic with focus: recheck.

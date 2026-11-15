@@ -17,6 +17,14 @@ All notable changes to Local Dictation are documented here. The format follows [
 
 ## [Unreleased]
 
+### Added
+
+- **Allow automatic paste into a terminal**, for example to dictate into vim. Settings → Delivery → *Allow automatic paste into these terminals*: choose a terminal and confirm. In a terminal, line breaks, tabs and other control characters are replaced with spaces, so a paste never presses Enter. Your exclusion list still takes priority. Settings schema v5. ADR-016.
+
+### Changed
+
+- **macOS:** when Accessibility is not enabled, Settings → Delivery explains how to remove a stale Local Dictation entry left by an earlier version.
+
 ## [0.11.0] - 2026-11-14
 
 ### Added
