@@ -33,8 +33,8 @@ export function Review() {
       <h1>Review text</h1>
       {pending && (
         <p role="alert" className="notice">
-          A new dictation can't start while this text is waiting. Copy or discard it, then press your dictation shortcut
-          again.
+          A new dictation can't start while this text is waiting. Copy or discard it, and the new dictation starts.
+          Close this window to keep the text without starting.
         </p>
       )}
       <p className="hint">Automatic paste is turned off while this window is open. Copy the text, or focus the destination and use your paste shortcut.</p>

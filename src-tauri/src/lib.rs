@@ -224,6 +224,40 @@ fn opens_review(o: &Outcome) -> bool {
     matches!(o, Outcome::Rejected(AppError::DraftPending))
 }
 
+/// Set when a refused start opened Review. Copying or discarding that draft
+/// then starts the dictation the user asked for; closing Review or the
+/// draft expiring cancels it.
+static RESUME_AFTER_DRAFT: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Time for the previous app to become active again before the new session
+/// captures its target. If it is not, the target is this app and the result
+/// becomes a draft (never a paste somewhere unexpected).
+const RESUME_FOCUS_DELAY: Duration = Duration::from_millis(400);
+
+/// Hides Review and starts the dictation the refused press asked for. On
+/// macOS the app hides when no settings window is open, so the previously
+/// active app regains focus; nothing is ever focused by force.
+fn resume_dictation(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        if let Some(w) = app.get_webview_window("review") {
+            let _ = w.hide();
+        }
+        #[cfg(target_os = "macos")]
+        if !app
+            .get_webview_window("main")
+            .is_some_and(|w| w.is_visible().unwrap_or(true))
+        {
+            let _ = app.hide();
+        }
+        std::thread::sleep(RESUME_FOCUS_DELAY);
+        if let Some(state) = app.try_state::<AppState>() {
+            state.handle.send(Command::Toggle);
+        }
+    });
+}
+
 /// `ui.show_hud` and `ui.hud_position`, with the defaults if settings are
 /// unavailable.
 fn hud_prefs(app: &AppHandle) -> (bool, HudPosition) {
@@ -304,8 +338,19 @@ impl Notifier for TauriNotifier {
         let _ = self
             .app
             .emit_to("review", "outcome", OutcomePayload { outcome });
-        if opens_review(&outcome) {
-            show_review(&self.app);
+        use std::sync::atomic::Ordering::SeqCst;
+        match outcome {
+            o if opens_review(&o) => {
+                RESUME_AFTER_DRAFT.store(true, SeqCst);
+                show_review(&self.app);
+            }
+            Outcome::DraftCopied | Outcome::DraftDiscarded => {
+                if RESUME_AFTER_DRAFT.swap(false, SeqCst) {
+                    resume_dictation(&self.app);
+                }
+            }
+            Outcome::DraftExpired => RESUME_AFTER_DRAFT.store(false, SeqCst),
+            _ => {}
         }
         let (show_hud, position) = hud_prefs(&self.app);
         if !show_hud || !banner_for(&outcome) {
@@ -1030,6 +1075,9 @@ pub fn run() {
             {
                 api.prevent_close();
                 let _ = window.hide();
+                if window.label() == "review" {
+                    RESUME_AFTER_DRAFT.store(false, std::sync::atomic::Ordering::SeqCst);
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![
