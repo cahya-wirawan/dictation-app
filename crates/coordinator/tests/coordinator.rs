@@ -212,6 +212,21 @@ impl Rig {
         }
     }
 
+    /// Waits for the first session to be listening with the mic open,
+    /// instead of a fixed sleep: on a slow CI runner the actor and capture
+    /// threads can take longer than 150 ms to get there. With 16-sample
+    /// chunks per 2 ms poll the 11 s fixture plays at half speed, so the
+    /// session is still listening long after this returns.
+    fn wait_listening(&self) {
+        let deadline = Instant::now() + T;
+        while self.snapshot().phase != Phase::Listening || self.mic.open.load(Ordering::SeqCst) != 1
+        {
+            assert!(Instant::now() < deadline, "capture never opened");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(self.mic.opened_total.load(Ordering::SeqCst), 1);
+    }
+
     fn next_outcome(&self) -> Outcome {
         self.outcomes.recv_timeout(T).expect("no outcome")
     }
@@ -372,7 +387,7 @@ fn cancel_while_listening_closes_mic_and_recovers() {
     let (w, jobs, _) = fake_worker("x", Duration::ZERO);
     let r = Rig::new(jfk(), 16, None, EndpointConfig::default(), w);
     r.h.send(Command::Toggle);
-    std::thread::sleep(Duration::from_millis(200));
+    r.wait_listening();
     assert!(r.snapshot().capture_open);
     r.h.send(Command::Cancel);
     assert_eq!(r.next_outcome(), Outcome::Canceled);
@@ -452,8 +467,7 @@ fn shutdown_while_listening_closes_mic() {
     let (w, _, _) = fake_worker("x", Duration::ZERO);
     let r = Rig::new(jfk(), 16, None, EndpointConfig::default(), w);
     r.h.send(Command::Toggle);
-    std::thread::sleep(Duration::from_millis(150));
-    assert_eq!(r.mic.open.load(Ordering::SeqCst), 1);
+    r.wait_listening();
     let mic = r.mic.clone();
     r.coord.shutdown();
     let deadline = Instant::now() + Duration::from_secs(5);
