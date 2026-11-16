@@ -4,6 +4,11 @@
   "version": "0.13.0",
   "type": "module",
   "packageManager": "pnpm@10.0.0",
+  "pnpm": {
+    "overrides": {
+      "minimatch": ">=11.0.1"
+    }
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
