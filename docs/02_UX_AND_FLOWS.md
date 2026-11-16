@@ -47,7 +47,7 @@ Model deletion/switching is disabled while its worker job is active. Apply micro
 - Holding the toggle chord must not repeatedly start and stop. Require release before accepting the next toggle press.
 - Cancel uses a scoped global chord and tray action. Escape by itself only cancels when a dictation-owned window has focus; globally capturing Escape would interfere with the receiving app.
 - Opening Review intentionally opts out of pending automatic paste. Editing a draft creates a new draft revision; a stale delivery request must fail validation.
-- Starting while a draft exists shows “Review, copy, or discard your previous text first.” It must not discard silently.
+- Starting while a draft exists shows “Review, copy, or discard your previous text first.” It must not discard silently. The app opens Review with that notice. Copying or discarding that draft then starts the dictation the user asked for: Review hides (on macOS the app hides when no settings window is open, so the previous app becomes active again; nothing is focused by force) and the session starts about 400 ms later, capturing its target then. Closing Review, or the draft expiring, keeps the draft without starting.
 - Start/stop sounds are off by default; if enabled, stop the start cue before opening capture so it is not recorded. Do not use an inference-complete sound that hides delivery failure.
 - Never append Enter/Return. Preserve transcript line breaks only; no automatic message send or terminal execution. Exception: a paste into a trusted terminal replaces line breaks and other control characters with spaces (ADR-016).
 - Do not silently retry after a paste attempt: a receiving editor may already contain the text.

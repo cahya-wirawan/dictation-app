@@ -60,6 +60,13 @@ Lockfiles: `Cargo.lock`, `pnpm-lock.yaml`.
 - Measured on the M2 Pro (details in ADR-017): warm 99 ms vs 368 ms on CPU, cold start 312 ms vs 527 ms, peak RSS 332 vs 243 MiB.
 - Not yet verified: the app with Metal in a GUI session, and the CPU fallback on a machine without Metal.
 
+## Waiting draft opens Review (after v0.12.0)
+
+- A start refused with `DRAFT_PENDING` (a draft is waiting) used to show nothing. The shell's notifier now calls `show_review` for that outcome (`opens_review` in `src-tauri/src/lib.rs`), and the Review window shows a notice above the draft until the next outcome. The reducer is unchanged: the draft is never discarded silently (docs/02 §4).
+- **Resume:** that refusal sets `RESUME_AFTER_DRAFT`. `DraftCopied` or `DraftDiscarded` then runs `resume_dictation`: hide Review, on macOS `app.hide()` when Settings is not visible, wait 400 ms, send `Command::Toggle`. The target is captured at that point; if focus has not returned, the target is this app and the text becomes a draft. Closing Review or `DraftExpired` clears the flag.
+- **Tests:** `src/review/Review.test.tsx`.
+- **Field test on macOS (16 November 2026):** Review opens with the notice, and Copy or Discard starts the new dictation. Not yet verified: Windows.
+
 ## Trusted terminals (after v0.11.0, ADR-016)
 
 - **Setting:** `delivery.trusted_terminals` (schema v5, `v4_to_v5`). Validation accepts only `TERMINAL_APPS`, which moved from the coordinator to `crates/domain/src/config.rs`; `delivery::DEFAULT_EXCLUDED_APPS` re-exports it.
