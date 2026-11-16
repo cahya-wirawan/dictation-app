@@ -118,7 +118,7 @@ Accepted. Supersedes the "Metal stays off" line of ADR-013 for the arm64 slice. 
 - **Build.** `scripts/stage-worker.sh` enables the worker's `metal` feature for `aarch64-apple-darwin`; `DICTATION_METAL=0` turns it off. The x86_64 slice stays CPU only. The Metal shaders are embedded (`GGML_METAL_EMBED_LIBRARY`), so the bundle has no extra file and needs no new entitlement. `build.rs` links clang's runtime (`clang_rt.osx`), which ggml-metal's `@available` checks need.
 - **Fallback.** If no Metal device can be used, whisper.cpp runs the model on the CPU. Not yet exercised on a machine without Metal.
 - **Not changed.** `transcription.backend` (auto/cpu/metal) is still unused. Choosing a backend per load needs a worker-protocol change; until then Apple Silicon always asks for Metal.
-- **Evidence.** All worker tests pass with and without `--features metal` on the M2 Pro. The hard-cancel test now uses 120 s of audio, because 30 s finished in about 0.3 s on Metal, before the cancel. CI's bundle job transcribes with the arm64 slice of the built universal worker.
+- **Evidence.** All worker tests pass with and without `--features metal` on the M2 Pro. The hard-cancel test now uses 120 s of audio, because 30 s finished in about 0.3 s on Metal, before the cancel. CI's bundle job transcribes with the arm64 slice of the built universal worker. Field test on macOS (16 November 2026): dictation and cancel work in the app.
 - **Risk.** About 90 MiB more resident memory while a model is loaded.
 
 ## Risk register
