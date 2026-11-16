@@ -17,6 +17,8 @@ All notable changes to Local Dictation are documented here. The format follows [
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-16
+
 ### Changed
 
 - **Apple Silicon Macs transcribe on the GPU (Metal).** On an M2 Pro an 11-second phrase now takes about 0.1 s instead of 0.4 s. Intel Macs, Windows and Linux still use the CPU. ADR-017.
@@ -257,7 +259,8 @@ Milestone M0 feasibility spike, partially complete. See `docs/IMPLEMENTATION_STA
 - No dictation session flow yet: there is no coordinator, config persistence, model manager or onboarding (milestone M1 and later).
 - Performance numbers so far come from a Linux x86_64 development host, not the reference hardware.
 
-[Unreleased]: https://github.com/cahya-wirawan/dictation-app/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/cahya-wirawan/dictation-app/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/cahya-wirawan/dictation-app/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/cahya-wirawan/dictation-app/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/cahya-wirawan/dictation-app/compare/v0.10.2...v0.11.0
 [0.10.2]: https://github.com/cahya-wirawan/dictation-app/compare/v0.10.1...v0.10.2

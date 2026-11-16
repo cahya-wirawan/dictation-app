@@ -58,7 +58,7 @@ Lockfiles: `Cargo.lock`, `pnpm-lock.yaml`.
 
 - `scripts/stage-worker.sh` builds the arm64 worker with `--features metal`. `build.rs` now links `clang_rt.osx`, without which Metal failed to link (`__isPlatformVersionAtLeast`).
 - Measured on the M2 Pro (details in ADR-017): warm 99 ms vs 368 ms on CPU, cold start 312 ms vs 527 ms, peak RSS 332 vs 243 MiB.
-- Not yet verified: the app with Metal in a GUI session, and the CPU fallback on a machine without Metal.
+- **Field test on macOS (16 November 2026):** dictation and cancel work in the app with Metal. Not yet verified: the CPU fallback on a machine without Metal.
 
 ## Waiting draft opens Review (after v0.12.0)
 
