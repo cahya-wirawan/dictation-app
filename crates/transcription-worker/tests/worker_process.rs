@@ -249,9 +249,22 @@ fn symlinked_model_is_rejected() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// Real inference tests run one at a time. Each worker starts up to 8 ggml
+/// threads, which spin while they wait; two workers on a 4-core CI runner
+/// slowed an 11 s job from about 1.5 s to 93 s and past the job timeout.
+static INFERENCE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn one_inference_at_a_time() -> std::sync::MutexGuard<'static, ()> {
+    // A failed test poisons the lock; the next one should still run.
+    INFERENCE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 #[test]
 fn jfk_fixture_transcribes_offline_on_cpu() {
     let Some((path, sha)) = model() else { return };
+    let _serial = one_inference_at_a_time();
     let pcm = jfk_pcm();
     let mut c = WorkerClient::spawn(&worker_exe(), 10, T).unwrap();
     let load_ms = c.load_model(&path, &sha, Duration::from_secs(60)).unwrap();
@@ -296,6 +309,7 @@ fn jfk_fixture_transcribes_offline_on_cpu() {
 #[test]
 fn hard_cancel_kills_reaps_and_restarts() {
     let Some((path, sha)) = model() else { return };
+    let _serial = one_inference_at_a_time();
     // The longest allowed job, so inference is still running when we cancel,
     // even with Metal (30 s takes about 0.3 s there, 120 s about 1.2 s).
     let pcm: Vec<f32> = jfk_pcm()
@@ -340,6 +354,7 @@ fn hard_cancel_kills_reaps_and_restarts() {
 #[test]
 fn timeout_kills_worker() {
     let Some((path, sha)) = model() else { return };
+    let _serial = one_inference_at_a_time();
     let pcm: Vec<f32> = jfk_pcm().into_iter().cycle().take(16_000 * 60).collect();
     let mut c = WorkerClient::spawn(&worker_exe(), 30, T).unwrap();
     c.load_model(&path, &sha, Duration::from_secs(60)).unwrap();
