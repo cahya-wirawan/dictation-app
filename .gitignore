@@ -80,3 +80,7 @@ node_modules/
 src-tauri/gen/
 src-tauri/binaries/
 *.tsbuildinfo
+
+# codehover
+codehover-site/
+.codehover-cache/
