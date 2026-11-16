@@ -54,6 +54,14 @@ The Tauri crate compiles and links on macOS, and the bundle layout is correct.
 
 Lockfiles: `Cargo.lock`, `pnpm-lock.yaml`.
 
+## Known dependency advisories
+
+- **`minimatch` (GHSA-g3hv-75wg-m249, fixed):** ESLint pulled in 10.2.6, which has a denial-of-service advisory fixed in 11.0.1. `package.json` has a pnpm override (`minimatch: ">=11.0.1"`), which resolves to 11.0.8 (Node 20 or newer). Remove the override once ESLint depends on a patched release itself.
+- **`glib` 0.18.5 (GHSA-wrw7-89jp-8q8g / RUSTSEC-2024-0429, open, not fixable here):** an unsoundness bug in `glib::VariantStrIter`, fixed in `glib` 0.20. Dependabot suggests `glib = "0.20"`, but that would only add a second copy and leave 0.18.5 in `Cargo.lock`. Tauri's Linux GTK3 stack pins the old bindings: `wry` 0.57.2 and `tao` 0.37.2 need `gtk` ^0.18, and `webkit2gtk` 2.0.2 needs `glib` ^0.18 (checked on crates.io, 16 November 2026). `gtk` 0.19.0 needs `glib` ^0.22 and is incompatible with them. The Tauri 3.0.0-alpha.6 release still uses `gtk` ^0.18.
+  - **Exposure:** nothing in this repository calls `glib::VariantStrIter` or uses `glib` directly. The crate is built only for the Linux target, which is experimental.
+  - **Resolution:** dismiss the Dependabot alert as "vulnerable code is not actually used". Revisit it when Tauri, `wry` and `tao` move to newer GTK bindings.
+- **Unmaintained crates (no fix available):** `proc-macro-error` (RUSTSEC-2024-0370), `zbus_names` (RUSTSEC-2026-0371), `zvariant` (RUSTSEC-2026-0370) and `zvariant_derive` (RUSTSEC-2026-0372). These are maintenance warnings, not vulnerabilities.
+
 ## Metal on Apple Silicon (after v0.12.0, ADR-017)
 
 - `scripts/stage-worker.sh` builds the arm64 worker with `--features metal`. `build.rs` now links `clang_rt.osx`, without which Metal failed to link (`__isPlatformVersionAtLeast`).
