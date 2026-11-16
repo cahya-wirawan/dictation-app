@@ -17,6 +17,12 @@ All notable changes to Local Dictation are documented here. The format follows [
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-11-16
+
+### Security
+
+- **Build tooling:** `minimatch` is pinned to 11.0.1 or newer (GHSA-g3hv-75wg-m249, denial of service). It is a development dependency of ESLint and is not part of the app, so installed copies were not affected.
+
 ## [0.13.0] - 2026-11-16
 
 ### Changed
@@ -259,7 +265,8 @@ Milestone M0 feasibility spike, partially complete. See `docs/IMPLEMENTATION_STA
 - No dictation session flow yet: there is no coordinator, config persistence, model manager or onboarding (milestone M1 and later).
 - Performance numbers so far come from a Linux x86_64 development host, not the reference hardware.
 
-[Unreleased]: https://github.com/cahya-wirawan/dictation-app/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/cahya-wirawan/dictation-app/compare/v0.13.1...HEAD
+[0.13.1]: https://github.com/cahya-wirawan/dictation-app/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/cahya-wirawan/dictation-app/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/cahya-wirawan/dictation-app/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/cahya-wirawan/dictation-app/compare/v0.10.2...v0.11.0
