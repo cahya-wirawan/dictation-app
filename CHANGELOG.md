@@ -17,6 +17,10 @@ All notable changes to Local Dictation are documented here. The format follows [
 
 ## [Unreleased]
 
+### Changed
+
+- **Pressing the dictation shortcut while earlier text is waiting now opens Review text** with a notice. Copy or discard the text and the new dictation starts; close the window to keep the text without starting. Before, the press did nothing visible.
+
 ## [0.12.0] - 2026-11-15
 
 ### Added
