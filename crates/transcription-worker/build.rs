@@ -123,6 +123,20 @@ fn main() {
             if metal {
                 println!("cargo::rustc-link-lib=framework=Metal");
                 println!("cargo::rustc-link-lib=framework=MetalKit");
+                // ggml-metal's `@available` checks call
+                // `__isPlatformVersionAtLeast` from clang's runtime, which
+                // rustc does not link (it passes -nodefaultlibs).
+                let compiler = cc::Build::new().get_compiler();
+                let dir = Command::new(compiler.path())
+                    .arg("-print-runtime-dir")
+                    .output()
+                    .ok()
+                    .filter(|o| o.status.success())
+                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+                    .filter(|d| Path::new(d).join("libclang_rt.osx.a").is_file())
+                    .unwrap_or_else(|| panic!("clang runtime (libclang_rt.osx.a) not found"));
+                println!("cargo::rustc-link-search=native={dir}");
+                println!("cargo::rustc-link-lib=static=clang_rt.osx");
             }
         }
         // ggml-cpu reads the CPU name from the registry.

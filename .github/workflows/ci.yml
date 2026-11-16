@@ -229,7 +229,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Stage universal release worker (arm64 + x86_64, portable CPU build)
+      - name: Stage universal release worker (arm64 with Metal + x86_64 CPU, portable build)
         run: TARGET=universal-apple-darwin PROFILE=release ./scripts/stage-worker.sh
       - name: Build universal .app + DMG (ad-hoc signed, hardened runtime)
         env:

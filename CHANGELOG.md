@@ -19,6 +19,7 @@ All notable changes to Local Dictation are documented here. The format follows [
 
 ### Changed
 
+- **Apple Silicon Macs transcribe on the GPU (Metal).** On an M2 Pro an 11-second phrase now takes about 0.1 s instead of 0.4 s. Intel Macs, Windows and Linux still use the CPU. ADR-017.
 - **Pressing the dictation shortcut while earlier text is waiting now opens Review text** with a notice. Copy or discard the text and the new dictation starts; close the window to keep the text without starting. Before, the press did nothing visible.
 
 ## [0.12.0] - 2026-11-15

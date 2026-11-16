@@ -62,7 +62,7 @@ Accepted. The macOS release is a universal binary: arm64 + x86_64. Apple Silicon
 
 - **Build.** `tauri build --target universal-apple-darwin`. The worker is built once per architecture and joined with `lipo` (`scripts/stage-worker.sh`). Each whisper.cpp build sets `CMAKE_OSX_ARCHITECTURES` explicitly to one architecture.
 - **Intel CPU baseline.** The same x86-64-v3 baseline as ADR-012 (AVX2, FMA, F16C, BMI2). Every Intel Mac that runs macOS 13 or later is a 2017 or newer model with AVX2, so this excludes no supported Mac.
-- **Inference.** CPU on both slices, as on Apple Silicon. Metal stays off (M1 finding).
+- **Inference.** CPU on the x86_64 slice. The arm64 slice uses Metal since ADR-017 (M1 kept it off).
 - **Evidence.** CI checks that the app and the nested worker contain both slices, and runs the x86_64 worker slice on the JFK fixture under Rosetta 2. Rosetta proves the code is correct, not how fast it is on Intel. Rosetta translates AVX2 only from macOS 15, so the check needs a macOS 15 or later host. Field report: on a MacBook Pro 2019 (2.6 GHz 6-core i7) with Whisper Base, automatic paste into Notes worked, and the text appeared about 1–2 s after the user stopped speaking. Measured Intel timings and formal qualification are still open.
 - **Cost.** The DMG roughly doubles in size, because the worker and app binaries carry two slices.
 
@@ -109,6 +109,17 @@ Accepted. Requested by the user to dictate into vim running in Terminal. docs/05
 - **Unchanged.** All other delivery safeguards apply to terminals as to any app: the same field, released modifiers, the clipboard recheck, one paste chord and no automatic Enter.
 - **Risk.** Dictated words land on a shell prompt if that is what has the focus. Without a line break nothing runs until the user presses Enter, and the user chose this per terminal after a warning.
 - **Evidence.** Config tests (migration, only known terminals), scripted-platform tests (a trusted terminal pastes, another terminal and a user-excluded trusted terminal do not) and a unit test of the character replacement. Verified on macOS (15 November 2026): with Terminal trusted, dictation pastes into vim in insert mode. Other terminals and Windows are not yet verified.
+
+## ADR-017 — Metal on Apple Silicon
+
+Accepted. Supersedes the "Metal stays off" line of ADR-013 for the arm64 slice. docs/03 §5 allows Metal as "an optional build/profile on Apple Silicon with verified CPU fallback"; M1 kept it off because a cold load took about 5 s, and every hard cancel respawns the worker.
+
+- **New measurement.** whisper.cpp v1.9.5, Apple M2 Pro, Base, JFK 11 s fixture, `dictation-bench corpus --trials 3 --cold 3` on the portable release worker. Metal: warm median 99 ms (RTF 0.009), cold start (spawn, verified load, first job) median 312 ms, model load 192 ms, peak RSS 332 MiB. CPU (same build without Metal): 368 ms, 527 ms, 138 ms and 243 MiB. The 5 s cold load is gone, so a cancel costs about as much as on CPU.
+- **Build.** `scripts/stage-worker.sh` enables the worker's `metal` feature for `aarch64-apple-darwin`; `DICTATION_METAL=0` turns it off. The x86_64 slice stays CPU only. The Metal shaders are embedded (`GGML_METAL_EMBED_LIBRARY`), so the bundle has no extra file and needs no new entitlement. `build.rs` links clang's runtime (`clang_rt.osx`), which ggml-metal's `@available` checks need.
+- **Fallback.** If no Metal device can be used, whisper.cpp runs the model on the CPU. Not yet exercised on a machine without Metal.
+- **Not changed.** `transcription.backend` (auto/cpu/metal) is still unused. Choosing a backend per load needs a worker-protocol change; until then Apple Silicon always asks for Metal.
+- **Evidence.** All worker tests pass with and without `--features metal` on the M2 Pro. The hard-cancel test now uses 120 s of audio, because 30 s finished in about 0.3 s on Metal, before the cancel. CI's bundle job transcribes with the arm64 slice of the built universal worker.
+- **Risk.** About 90 MiB more resident memory while a model is loaded.
 
 ## Risk register
 

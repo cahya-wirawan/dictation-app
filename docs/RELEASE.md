@@ -13,7 +13,7 @@ This is how a release is cut and what must be true before it is published. It ap
 Pushing the tag starts `.github/workflows/release.yml`:
 
 1. **Consistency checks.** The version agrees across Cargo, npm, Tauri and the changelog, and the tag matches it. `pnpm notices:check` passes: notices are current and every shipped component has an allowed license.
-2. **Worker.** The release worker is built with `DICTATION_GGML_NATIVE=OFF`, which means portable CPU code plus Accelerate.
+2. **Worker.** The release worker is built with `DICTATION_GGML_NATIVE=OFF`, which means portable CPU code plus Accelerate. The arm64 slice also uses Metal (ADR-017).
 3. **App and DMG.** Universal (arm64 + x86_64, ADR-013): `TARGET=universal-apple-darwin ./scripts/stage-worker.sh`, then `tauri build --target universal-apple-darwin --bundles app,dmg`, with the hardened runtime and `src-tauri/Entitlements.plist`, which grants audio input only.
    - **With signing secrets:** the app is Developer ID signed, then notarized and stapled.
    - **Without them:** it is ad-hoc signed, and the job warns that the result is not for distribution.
