@@ -517,6 +517,18 @@ fn many_sessions_never_leave_capture_open() {
 
 // ---------- real worker ----------
 
+/// Real inference tests run one at a time. Each worker starts up to 8 ggml
+/// threads, which spin while they wait; two workers on a 4-core CI runner
+/// slowed an 11 s job from about 1.5 s to 93 s and past the job timeout.
+static INFERENCE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn one_inference_at_a_time() -> std::sync::MutexGuard<'static, ()> {
+    // A failed test poisons the lock; the next one should still run.
+    INFERENCE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 fn real_worker_cfg() -> Option<WorkerConfig> {
     let exe = std::env::current_exe()
         .ok()?
@@ -560,6 +572,7 @@ fn normalize(s: &str) -> String {
 #[test]
 fn real_worker_end_to_end_and_cancel_respawn() {
     let Some(cfg) = real_worker_cfg() else { return };
+    let _serial = one_inference_at_a_time();
     let mut audio = jfk();
     audio.extend(vec![0.0; 16_000 * 2]);
     // 1500 ms silence keeps jfk.wav's ~1.03 s oratorical pauses inside one phrase.
@@ -654,6 +667,7 @@ fn model_switch_is_exclusive_with_sessions() {
 #[test]
 fn real_worker_model_switch_keeps_previous_on_failure_and_unload() {
     let Some(cfg) = real_worker_cfg() else { return };
+    let _serial = one_inference_at_a_time();
     let good = cfg.model.lock().unwrap().clone().unwrap();
     let mut audio: Vec<f32> = jfk().into_iter().take(16_000 * 2 + 4_000).collect();
     audio.extend(vec![0.0; 16_000 * 2]);
